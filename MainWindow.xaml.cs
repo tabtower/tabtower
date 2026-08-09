@@ -220,6 +220,8 @@ public partial class MainWindow : Window
     {
         if (PresentationSource.FromVisual(this) is not HwndSource source) return;
 
+        App.ApplyDarkTitleBar(source.Handle);   // before the first frame; App also covers every dialog
+
         _appBar.Attach(source);
         _notifier.Attach(source);
         _notifier.Activated += () =>

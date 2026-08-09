@@ -88,6 +88,28 @@ public static class NativeMethods
 
     public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
     public const int DWMWA_CLOAKED = 14;
+    public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    public const int DWMWA_BORDER_COLOR = 34;
+    public const int DWMWA_CAPTION_COLOR = 35;
+    public const int DWMWA_TEXT_COLOR = 36;
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+
+    /// <summary>
+    /// Paints the native title bar to match the app's dark chrome. Caption tinting
+    /// (DWMWA_CAPTION_COLOR and friends) needs Windows 11 22000+; on older builds the
+    /// calls fail harmlessly and only the immersive dark mode flag takes effect.
+    /// Colors are COLORREF (0x00BBGGRR), not the ARGB used in XAML.
+    /// </summary>
+    public static void ApplyDarkTitleBar(IntPtr hwnd, int captionColorRef, int textColorRef)
+    {
+        int dark = 1;
+        DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+        DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, ref captionColorRef, sizeof(int));
+        DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, ref captionColorRef, sizeof(int));
+        DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, ref textColorRef, sizeof(int));
+    }
 
     [DllImport("dwmapi.dll")]
     public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
