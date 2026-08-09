@@ -154,6 +154,12 @@ public class SessionConfig
     public DateTime? LastEventAt { get; set; }
     public string? AutoTitle { get; set; }           // derived from the transcript (stage D)
     public string? TabTitle { get; set; }            // VSCode tab label (last ai-title entry)
+    // Persisted so the orphan sweep's clock survives a restart: it used to be runtime only,
+    // so every launch of the deck gave a dead session another full TTL and a card on a
+    // workspace worked in daily could never age out (issue 2026-08-09).
+    public DateTime? OrphanSince { get; set; }
+    public string? Entrypoint { get; set; }          // claude-vscode|cli|sdk-cli (transcript)
+    public DateTime? LastMessageAtUtc { get; set; }  // last real conversation event
 }
 
 /// <summary>Session status → border style. Lives in config so the mapping can change

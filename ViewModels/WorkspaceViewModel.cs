@@ -236,6 +236,14 @@ public sealed class WorkspaceViewModel : INotifyPropertyChanged
         set { if (_tasksExpanded != value) { _tasksExpanded = value; Raise(); } }
     }
 
+    /// <summary>When the workspace's last VSCode connector went away. Starts the grace
+    /// period after which the window's sessions are closed; cleared the moment a connector
+    /// for this workspace is back, so a window reload or a VSCode update — both a
+    /// disconnect followed by a reconnect seconds later — changes nothing. Runtime only:
+    /// a disconnect the deck never witnessed (it was down itself) must not schedule a
+    /// close, it falls back to the orphan sweep.</summary>
+    public DateTime? VscodeGoneAt { get; set; }
+
     /// <summary>Phantom sessions don't count — they must not float the workspace up.</summary>
     public bool HasOpenSessions => Sessions.Any(s => !s.Closed && !s.Phantom);
 

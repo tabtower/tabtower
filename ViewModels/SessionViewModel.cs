@@ -109,6 +109,18 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
     /// (ApplyHookInfo) and whenever the condition clears. Runtime only.</summary>
     public DateTime? OrphanSince { get; set; }
 
+    /// <summary>Which host runs this session, per the transcript's "entrypoint" field:
+    /// "claude-vscode", "cli", "sdk-cli". Decides whether a closing VSCode window may take
+    /// the session with it — a terminal session in the same folder must survive it
+    /// (decision 13). Null = not scanned yet; treated as "not proven VSCode".</summary>
+    public string? Entrypoint { get; set; }
+
+    /// <summary>Timestamp of the last real conversation event in the transcript. The file's
+    /// own mtime is not a substitute — Claude Code rewrites the file with a timestampless
+    /// "last-prompt" record on tab open/close, which looks like activity and kept resetting
+    /// the orphan clock (issue 2026-08-09).</summary>
+    public DateTime? LastMessageAtUtc { get; set; }
+
     /// <summary>Discovered from the transcripts folder (expanded view) — not persisted.</summary>
     public bool Historical { get; init; }
 
