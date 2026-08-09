@@ -11,6 +11,11 @@ to it automatically.
 
 <!-- new releases are inserted directly below this line -->
 
+## v0.9.9 - 2026-08-09
+
+- chore: sync hook script version header to 0.9.9
+- fix(sessions): close a workspace's sessions when its VSCode window exits (T-0362)
+
 ## v0.9.8 - 2026-08-09
 
 - chore: sync hook script version header to 0.9.8
