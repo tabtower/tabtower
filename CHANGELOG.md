@@ -11,6 +11,11 @@ to it automatically.
 
 <!-- new releases are inserted directly below this line -->
 
+## v0.9.8 - 2026-08-09
+
+- chore: sync hook script version header to 0.9.8
+- fix(zone): remove the full-screen zone, cap custom at 90% (T-0364)
+
 ## v0.9.7 - 2026-08-09
 
 - chore: sync hook script version header to 0.9.7
