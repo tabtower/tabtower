@@ -163,3 +163,39 @@ if ((Test-Path $flag) -and ((Get-Content $flag -Raw).Trim() -eq '0')) { exit 0 }
   status. It used to apply only to a missing `--transcript` and, separately, only to `idle`
   sessions — so a single `Notification` on such an id (agent mode sends one when the run
   finishes) pinned a blinking orange card to the deck permanently.
+
+## Closing a session the hooks never closed
+
+`SessionEnd` does not fire when a VSCode window closes, so the deck has to work the end of
+a session out for itself. Three sweeps do it, in order of how much they know:
+
+| Sweep | Fires when | Wait |
+|---|---|---|
+| VSCode window exit (v0.9.9) | the workspace's last extension connector went away | 90s |
+| Orphan | no living host, and nothing has happened | 15 min on **both** |
+| Ghost / phantom | titleless with no transcript on disk | 30 min |
+
+**The window exit is an event, not an inference** — that is why it needs no activity
+threshold and closes in 90 seconds rather than 15 minutes. The 90s is only there to tell an
+exit from a reload: `Developer: Reload Window`, a VSCode update and an extension-host
+restart all disconnect and reconnect, measured at up to 25s apart. A connector back for
+that workspace inside the window cancels the close outright.
+
+Two things are deliberately **not** treated as proof a session is alive:
+
+- **A restored tab.** VSCode reopens the Claude tab of a long-dead session with its old
+  title, so it correlates and looks live. Only a hook revives a session the deck
+  auto-closed (`orphaned`, `stale`, `vscode-closed`); reopening the window does not.
+- **The transcript's mtime.** Claude Code appends a timestampless
+  `{"type":"last-prompt"}` record when a tab opens or closes, so a file nobody has talked
+  to in days keeps getting a fresh mtime. Activity is read from the last real timestamp
+  *inside* the file (`LastMessageAtUtc`) instead.
+
+Only sessions the transcript reports as `"entrypoint":"claude-vscode"` are closed with the
+window. A terminal session (`cli`, `sdk-cli`) in the same folder outlives it and stays on
+the orphan path, and so does a session that has not been scanned yet — the engine
+underneath stays generic (decision 13).
+
+A wrong close is recoverable: the next hook from that session revives the card. Quitting
+SessionDeck is not a close — tearing the pipe down disconnects every extension at once, and
+that path is suppressed explicitly.

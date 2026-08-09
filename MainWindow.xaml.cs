@@ -169,6 +169,9 @@ public partial class MainWindow : Window
                     LastEventAt = sc.LastEventAt,
                     AutoTitle = sc.AutoTitle,
                     TabTitle = sc.TabTitle,
+                    OrphanSince = sc.OrphanSince,
+                    Entrypoint = sc.Entrypoint,
+                    LastMessageAtUtc = sc.LastMessageAtUtc,
                     // Restored waiting must be re-provable from the transcript, or the
                     // first scan clears it (T-0313: a fork-phantom orange otherwise
                     // survives restarts — the persisted status said waiting and the
@@ -253,8 +256,16 @@ public partial class MainWindow : Window
         _pipe.Start();
     }
 
+    /// <summary>Set before the pipe is torn down. Disposing PipeServer cancels every
+    /// connector's pending read, so each one reports a disconnect on the way out — which
+    /// is indistinguishable from the user closing the window unless we say so. Without
+    /// this, quitting the deck would close every session in every workspace (the log shows
+    /// "app quit" followed by one "vscode disconnected" per open window).</summary>
+    private bool _shuttingDown;
+
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        _shuttingDown = true;
         LogService.Info("app", "quit");
         _configStore.SaveNow();
         _pipe?.Dispose();
@@ -326,6 +337,9 @@ public partial class MainWindow : Window
                     LastEventAt = s.LastEventAt,
                     AutoTitle = s.AutoTitle,
                     TabTitle = s.TabTitle,
+                    OrphanSince = s.OrphanSince,
+                    Entrypoint = s.Entrypoint,
+                    LastMessageAtUtc = s.LastMessageAtUtc,
                 });
             }
             cfg.Workspaces.Add(wc);
@@ -416,6 +430,7 @@ public partial class MainWindow : Window
             RefreshMetadata(ws);
         RefreshTranscriptTitles();
         RefreshPhantomSessions();
+        RefreshExitedVscodeWindows();
         RefreshOrphanSessions();
         // A permission dialog freezes the transcript, so the scan above may find nothing
         // new — the threshold still has to be re-checked against the stored pending call.
@@ -522,13 +537,64 @@ public partial class MainWindow : Window
     private static readonly TimeSpan OrphanSessionTtl = TimeSpan.FromMinutes(15);
 
     /// <summary>Newest sign of life we can observe: hook events (LastEventAt) or the
-    /// transcript file's own mtime — the transcript is authoritative when hooks are dead.</summary>
+    /// transcript's last conversation event — the transcript is authoritative when hooks
+    /// are dead.
+    ///
+    /// Deliberately NOT the file's mtime. Claude Code appends a timestampless
+    /// {"type":"last-prompt"} record when a session's tab opens or closes, so the mtime of
+    /// a transcript nobody has talked to in days keeps jumping to now. That read as
+    /// activity and held the orphan sweep off a session dead since 06/08 (issue
+    /// 2026-08-09). LastMessageAtUtc comes from inside the file and only moves on a real
+    /// turn. Falls back to the mtime while the session has not been scanned yet.</summary>
     private static DateTime LastActivity(SessionViewModel s)
     {
         var last = s.LastEventAt ?? s.StartedAt;
+        if (s.LastMessageAtUtc is { } stamp)
+        {
+            var local = stamp.ToLocalTime();
+            return local > last ? local : last;
+        }
         if (s.TranscriptPath is { Length: > 0 } path)
             try { var m = File.GetLastWriteTime(path); if (m > last) last = m; } catch { }
         return last;
+    }
+
+    // ---- VSCode window exit (request 2026-08-09) ----
+
+    /// <summary>How long a workspace must stay without any VSCode connector before its
+    /// sessions are closed. Covers the disconnect/reconnect pairs that are not an exit:
+    /// "Developer: Reload Window", a VSCode update, the extension host restarting. Measured
+    /// gap for those is seconds — 25s in the worst case in the log — so 90s is comfortable
+    /// and still an order of magnitude quicker than the orphan TTL it replaces here.</summary>
+    private static readonly TimeSpan VscodeExitGrace = TimeSpan.FromSeconds(90);
+
+    /// <summary>Only a session the transcript says runs inside VSCode may be closed by its
+    /// window exiting. A terminal session ("cli"/"sdk-cli") in the same folder outlives the
+    /// window and stays on the slow orphan path, and so does one we have not scanned yet —
+    /// the engine underneath stays generic (decision 13).</summary>
+    private static bool HostedInVscode(SessionViewModel s)
+        => s.Entrypoint is "claude-vscode";
+
+    /// <summary>Close the sessions of a VSCode window that exited. The window closing is a
+    /// real event, unlike the silence the orphan sweep infers from, so this needs no
+    /// activity threshold — only the grace period that tells an exit from a reload.
+    /// The workspace sinks in the deck on its own once nothing is open (IsActive).</summary>
+    private void RefreshExitedVscodeWindows()
+    {
+        // Snapshot: closing the last session re-sorts the deck (the workspace stops being
+        // IsActive), and SortWorkspaces moves items in the very collection being walked.
+        foreach (var ws in Vm.Workspaces.ToList())
+        {
+            if (ws.VscodeGoneAt is not { } goneAt) continue;
+            if (FindConnector(ws) != null) { ws.VscodeGoneAt = null; continue; }
+            if (DateTime.Now - goneAt < VscodeExitGrace) continue;
+            ws.VscodeGoneAt = null;
+            foreach (var s in ws.Sessions.Where(s => !s.Closed && !s.Phantom && HostedInVscode(s)).ToList())
+            {
+                LogService.Info("status", $"session={s.SessionId} closing (vscode window exited) ws=\"{ws.DisplayTitle}\"");
+                EndSession(s.SessionId, new HookInfo(Reason: "vscode-closed"));
+            }
+        }
     }
 
     /// <summary>Has anything to match a VSCode tab label against — a session with no
@@ -615,6 +681,16 @@ public partial class MainWindow : Window
                         retitled.Add(ws);
                     }
                     session.PendingCall = tInfo.Pending;
+                    if (tInfo.Entrypoint is { Length: > 0 } host && session.Entrypoint != host)
+                    {
+                        session.Entrypoint = host;
+                        changed = true;
+                    }
+                    if (tInfo.LastMessageAtUtc is { } stamp && session.LastMessageAtUtc != stamp)
+                    {
+                        session.LastMessageAtUtc = stamp;
+                        changed = true;
+                    }
                 }
                 // Evaluate right after a scan too, so a question goes orange at once
                 // instead of waiting for the next tick.
@@ -1293,9 +1369,11 @@ public partial class MainWindow : Window
         var (ws, session) = found;
         if (session.Closed)
         {
-            // An auto-closed session (orphan/stale sweep) that emits a hook is demonstrably
-            // alive — the sweep guessed wrong; revive it. User/hook closes stay final.
-            if (session.EndReason is "orphaned" or "stale")
+            // An auto-closed session (orphan/stale/window-exit sweep) that emits a hook is
+            // demonstrably alive — the sweep guessed wrong; revive it. User/hook closes
+            // stay final. A hook only: a VSCode tab restored on window reopen carries the
+            // dead session's old title and is no proof of life at all (issue 2026-08-09).
+            if (session.EndReason is "orphaned" or "stale" or "vscode-closed")
             {
                 session.Closed = false;
                 session.EndedAt = null;
@@ -1459,6 +1537,9 @@ public partial class MainWindow : Window
 
         if (Vm.FindByPath(conn.WorkspacePath) is { } ws)
         {
+            // A window is back before the grace ran out — a reload or an update, not an
+            // exit. Nothing to close.
+            ws.VscodeGoneAt = null;
             // The extension is the fresher branch source (event-driven vs our 10s poll).
             if (!string.IsNullOrEmpty(sync.Branch)) ws.Branch = sync.Branch;
             var labels = sync.Tabs.Select(t => t.Label).ToList();
@@ -1508,12 +1589,17 @@ public partial class MainWindow : Window
     {
         LogService.Info("vscode", $"disconnected pid={conn.Pid} ws=\"{conn.WorkspacePath}\"");
         _connectors.Remove(conn);
+        if (_shuttingDown) return;
         if (conn.WorkspacePath.Length > 0 &&
             Vm.FindByPath(conn.WorkspacePath) is { } ws && FindConnector(ws) == null)
         {
             ws.SetClaudeTabs(new List<string>());
             ws.ActiveClaudeTabLabel = null;
             foreach (var s in ws.Sessions) s.OpenAsTab = false;
+            // The window going away is the event the orphan sweep was only ever guessing
+            // at. Start the grace period rather than closing now — a reload reconnects
+            // within seconds (request 2026-08-09).
+            ws.VscodeGoneAt = DateTime.Now;
         }
     }
 

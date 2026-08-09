@@ -21,11 +21,22 @@ namespace SessionDeck.Services;
 /// "ai-title" at all gets labelled from a user prompt instead, which no single title field
 /// reproduces (issue 2026-07-20, second report). Matching against the whole candidate set
 /// covers every labelling rule Claude Code uses without having to know which one applied.</param>
+/// <param name="Entrypoint">Where this session runs: "claude-vscode" for the VSCode
+/// extension, "cli"/"sdk-cli" for a terminal. Every message line carries it. Only a
+/// VSCode-hosted session may be closed when its VSCode window exits — a terminal session
+/// in the same folder outlives the window (decision 13 keeps the engine generic).</param>
+/// <param name="LastMessageAtUtc">Timestamp of the newest line that has one — i.e. the
+/// last real conversation event. NOT the file's mtime: Claude Code appends a timestampless
+/// "last-prompt" record when a tab opens or closes, which bumps the mtime with no
+/// conversation behind it and read as a sign of life to the orphan sweep (issue
+/// 2026-08-09 — a session dead for three days kept its card).</param>
 public sealed record TranscriptInfo(
     string? TabTitle,
     string? AutoTitle,
     PendingCall? Pending = null,
-    IReadOnlyList<string>? LabelCandidates = null);
+    IReadOnlyList<string>? LabelCandidates = null,
+    string? Entrypoint = null,
+    DateTime? LastMessageAtUtc = null);
 
 /// <summary>A tool call with no tool_result yet — either Claude is blocked on the user,
 /// or the tool is simply still running. <see cref="IsAsk"/> separates the two.</summary>
@@ -114,12 +125,50 @@ public static class TranscriptReader
                 if (autoTitle != null && !candidates.Contains(autoTitle)) candidates.Add(autoTitle);
             }
 
-            return new TranscriptInfo(tabTitle, autoTitle, FindPendingCall(tail), candidates);
+            var (entrypoint, lastMessageAt) = ReadHostAndLastMessage(tail);
+            return new TranscriptInfo(tabTitle, autoTitle, FindPendingCall(tail), candidates,
+                                      entrypoint, lastMessageAt);
         }
         catch
         {
             return new TranscriptInfo(null, null);
         }
+    }
+
+    /// <summary>Walk the tail newest-first for the two root-level fields the sweeps need:
+    /// the host this session runs in, and when it last actually said something.
+    ///
+    /// Read from the tail rather than the whole file on purpose. It is bounded (the file is
+    /// multi-MB and the main loop is deliberately substring-based, not JSON-parsed), it is
+    /// exact — a "timestamp" substring inside message content can't be mistaken for the
+    /// root property — and for a resumed session it reflects the host it is running in
+    /// NOW rather than the one it was born in.</summary>
+    private static (string? Entrypoint, DateTime? LastMessageAtUtc) ReadHostAndLastMessage(
+        IEnumerable<string> tail)
+    {
+        string? entrypoint = null;
+        DateTime? lastMessageAt = null;
+        foreach (var line in tail.Reverse())
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement;
+                if (root.ValueKind != JsonValueKind.Object) continue;
+                if (entrypoint == null &&
+                    root.TryGetProperty("entrypoint", out var ep) && ep.ValueKind == JsonValueKind.String)
+                    entrypoint = ep.GetString();
+                if (lastMessageAt == null &&
+                    root.TryGetProperty("timestamp", out var ts) && ts.ValueKind == JsonValueKind.String &&
+                    DateTime.TryParse(ts.GetString(), null,
+                        System.Globalization.DateTimeStyles.AdjustToUniversal |
+                        System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed))
+                    lastMessageAt = parsed;
+            }
+            catch { }
+            if (entrypoint != null && lastMessageAt != null) break;
+        }
+        return (entrypoint, lastMessageAt);
     }
 
     /// <summary>A tool_use with no matching tool_result. For AskUserQuestion/ExitPlanMode
