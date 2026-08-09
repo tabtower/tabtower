@@ -306,7 +306,6 @@ public sealed class CommandExecutor
     {
         ZoneMode mode;
         if (a.Flags.Contains("off")) mode = ZoneMode.Off;
-        else if (a.Flags.Contains("full")) mode = ZoneMode.Full;
         else if (a.Options.TryGetValue("half", out var half))
         {
             if (half == "left") mode = ZoneMode.HalfLeft;
@@ -325,7 +324,7 @@ public sealed class CommandExecutor
             else if (custom == "right") mode = ZoneMode.CustomRight;
             else return Err("--custom must be left or right");
         }
-        else return Err("zone requires --half left|right, --quarter left|right, --custom left|right [--size 2/7], --full, or --off");
+        else return Err("zone requires --half left|right, --quarter left|right, --custom left|right [--size 2/7], or --off");
 
         string? size = null;
         if (a.Options.TryGetValue("size", out var sizeStr))
@@ -333,7 +332,7 @@ public sealed class CommandExecutor
             if (mode is not (ZoneMode.CustomLeft or ZoneMode.CustomRight))
                 return Err("--size only applies to --custom left|right");
             if (!ZoneSizeParser.TryParse(sizeStr, out _))
-                return Err("--size must be a fraction like 2/7, a percent like 40%, or a decimal 0.05..1");
+                return Err("--size must be a fraction like 2/7, a percent like 40%, or a decimal 0.05..0.9");
             size = sizeStr;
         }
 

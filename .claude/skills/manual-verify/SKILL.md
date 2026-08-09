@@ -54,8 +54,11 @@ Install the hooks per `hooks/README.md`, then open a Claude Code session:
 - [ ] Zone "Right half" docks and shrinks the work area; "Off" releases it.
 - [ ] "Left/Right quarter" takes a quarter width; a maximized window stays out.
 - [ ] Custom zone: "Custom left…" opens the size dialog; `2/7` ≈ 28.6%, `40%` and `0.4` work, invalid input disables OK, Cancel restores the previous choice, clicking the active item reopens the dialog, and the size survives a restart.
+- [ ] The zone dropdown has **no full-screen entry**, and `100%` / `1.0` / `1/1` in the size dialog is rejected (OK stays disabled). 90% is the widest accepted. See T-0364: a zone that leaves its monitor no work area pins explorer.exe at 100–430% of a core.
+- [ ] **Whole-monitor deck** (what replaced the full-screen zone): zone off + maximize + 📌 on, then restart — it comes back maximized and pinned on the same monitor.
+- [ ] **The shell stays quiet while zoned.** Sample `explorer.exe` once a second (`Win32_PerfRawData_PerfProc_Process`, diff `PageFaultsPersec` with the UInt32 wrap) through off / half / quarter / custom-90%: under 10,000 faults/sec and 20% of a core throughout. Measuring SessionDeck itself proves nothing — it stays at 1–3% while the shell burns.
 - [ ] Zone lock: while active, no title-bar drag, no frame resize (the cursor doesn't change), no double-click maximize, no Win+Shift+Arrow. Minimize/restore work and return exactly to the zone. Turning the zone off restores normal drag/resize.
-- [ ] Stage: monitor + full/half affect where ▶ lands.
+- [ ] Stage: monitor + full/half affect where ▶ lands (Stage full-screen is unrelated to the zone and still exists).
 
 ## 5. Persistence and startup
 

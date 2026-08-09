@@ -20,6 +20,25 @@ public sealed class AppBarService
     private bool _hasSavedBounds;
     private bool _selfPositioning;
     private double _customFraction = 1.0 / 3;
+    private RECT _appliedRect;
+    private bool _hasAppliedRect;
+
+    /// <summary>
+    /// Pixels of work area the reservation must always leave on its monitor.
+    /// A reservation that takes the monitor whole is accepted by the shell — no error, no
+    /// rejection — and the shell's own work-area bookkeeping then spins forever: measured
+    /// 08-08-2026 (T-0364) on a 1080x1920 display, explorer.exe sat at 100-430% of a core on up
+    /// to 1,004,675 soft page faults per second for as long as the app ran, and went quiet
+    /// within a second of it exiting. The cliff is at exactly zero — the identical test leaving
+    /// one pixel over measured clean — so this only has to be non-zero.
+    /// The user-facing cap is <see cref="ZoneSizeParser.MaxFraction"/>; this is the backstop,
+    /// and it is what guards the post-QUERYPOS rect, which another appbar on the same edge can
+    /// still push against the far edge however small our own width is.
+    /// </summary>
+    private const int MinFreeWorkAreaPx = 16;
+
+    private static bool SameRect(RECT a, RECT b)
+        => a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom;
 
     public void Attach(HwndSource source)
     {
@@ -32,7 +51,7 @@ public sealed class AppBarService
     public void Apply(ZoneMode mode, MonitorEntry monitor, double customFraction = 1.0 / 3)
     {
         if (_hwnd == IntPtr.Zero) return;
-        _customFraction = Math.Clamp(customFraction, 0.05, 1.0);
+        _customFraction = Math.Clamp(customFraction, 0.05, ZoneSizeParser.MaxFraction);
 
         if (mode == ZoneMode.Off)
         {
@@ -61,6 +80,7 @@ public sealed class AppBarService
         var abd = NewData();
         NativeMethods.SHAppBarMessage(NativeMethods.ABM_REMOVE, ref abd);
         _registered = false;
+        _hasAppliedRect = false;   // a fresh registration must post its reservation again
         if (_hasSavedBounds)
         {
             NativeMethods.SetWindowPos(_hwnd, IntPtr.Zero,
@@ -77,7 +97,6 @@ public sealed class AppBarService
         uint edge = rightEdge ? NativeMethods.ABE_RIGHT : NativeMethods.ABE_LEFT;
         int width = _mode switch
         {
-            ZoneMode.Full => mon.Width,
             ZoneMode.QuarterLeft or ZoneMode.QuarterRight => mon.Width / 4,
             ZoneMode.CustomLeft or ZoneMode.CustomRight =>
                 (int)Math.Round(mon.Width * _customFraction),
@@ -86,23 +105,40 @@ public sealed class AppBarService
         // Never reserve a zone narrower than the window's MinWidth: below it the
         // toolbar (incl. the zone combo itself) gets clipped and the user cannot
         // un-zone from the UI (bug 2026-07-22 — 13% custom zone buried the controls).
-        width = Math.Clamp(width, Math.Min(MinZoneWidthPx(), mon.Width), mon.Width);
+        // And never wide enough to leave the monitor without a work area — see
+        // MinFreeWorkAreaPx. The custom fraction is already capped below that, so this is a
+        // backstop against a hand-edited config, not the primary guard.
+        int maxWidth = Math.Max(1, mon.Width - MinFreeWorkAreaPx);
+        width = Math.Clamp(width, Math.Min(MinZoneWidthPx(), maxWidth), maxWidth);
 
         var abd = NewData();
         abd.uEdge = edge;
         abd.rc = new RECT { Left = mon.Left, Top = mon.Top, Right = mon.Right, Bottom = mon.Bottom };
-        if (_mode != ZoneMode.Full)
-        {
-            if (rightEdge) abd.rc.Left = mon.Right - width;
-            else abd.rc.Right = mon.Left + width;
-        }
+        if (rightEdge) abd.rc.Left = mon.Right - width;
+        else abd.rc.Right = mon.Left + width;
 
         NativeMethods.SHAppBarMessage(NativeMethods.ABM_QUERYPOS, ref abd);
-        // QUERYPOS may trim for the taskbar/other appbars; re-assert our width from the granted edge.
-        if (edge == NativeMethods.ABE_LEFT) abd.rc.Right = Math.Min(abd.rc.Left + width, mon.Right);
-        else abd.rc.Left = Math.Max(abd.rc.Right - width, mon.Left);
+        // QUERYPOS may trim for the taskbar/other appbars; re-assert our width from the granted
+        // edge — but never up to the far edge itself. QUERYPOS can shift our near edge inward
+        // (an appbar already docked there), and re-asserting the full width from the shifted
+        // edge would then run our rect to the monitor boundary and leave zero work area between
+        // the two reservations, which is the storm again from a different direction.
+        if (edge == NativeMethods.ABE_LEFT)
+            abd.rc.Right = Math.Min(abd.rc.Left + width, mon.Right - MinFreeWorkAreaPx);
+        else
+            abd.rc.Left = Math.Max(abd.rc.Right - width, mon.Left + MinFreeWorkAreaPx);
 
-        NativeMethods.SHAppBarMessage(NativeMethods.ABM_SETPOS, ref abd);
+        // Re-announce the reservation only when it actually moved. Every ABM_SETPOS makes the
+        // shell recompute and answer with ABN_POSCHANGED, which lands in WndProc and calls this
+        // method straight back — measured at 250 callbacks/sec (T-0364). This is a separate bug
+        // from the zero-work-area storm and affects every zone mode.
+        if (!_hasAppliedRect || !SameRect(_appliedRect, abd.rc))
+        {
+            _appliedRect = abd.rc;
+            _hasAppliedRect = true;
+            NativeMethods.SHAppBarMessage(NativeMethods.ABM_SETPOS, ref abd);
+        }
+
         // Win10/11 windows carry invisible resize borders: the visible (DWM) frame is
         // inset a few px from the window rect on the left/right/bottom, so placing the
         // window rect exactly on the zone leaves visible gaps. Inflate by the inset so
@@ -110,13 +146,23 @@ public sealed class AppBarService
         // maximized windows. The appbar reservation itself stays abd.rc, so neighbors
         // still align to the zone edge and only the transparent border overlaps them.
         RECT inset = GetInvisibleFrameInset();
+        int x = abd.rc.Left - inset.Left;
+        int y = abd.rc.Top - inset.Top;
+        int cx = abd.rc.Width + inset.Left + inset.Right;
+        int cy = abd.rc.Height + inset.Top + inset.Bottom;
+
+        // Move it only when it is not already exactly there. Repositioning a registered appbar
+        // window is itself enough to make the shell recompute and notify us again, with no
+        // ABM_SETPOS involved at all. The comparison is against where the window actually IS,
+        // not against what we last asked for: anything else that moves or resizes it must still
+        // get snapped back, which is the entire point of the zone.
+        if (NativeMethods.GetWindowRect(_hwnd, out RECT cur) &&
+            cur.Left == x && cur.Top == y && cur.Width == cx && cur.Height == cy) return;
+
         _selfPositioning = true;
         try
         {
-            NativeMethods.SetWindowPos(_hwnd, IntPtr.Zero,
-                abd.rc.Left - inset.Left, abd.rc.Top - inset.Top,
-                abd.rc.Width + inset.Left + inset.Right,
-                abd.rc.Height + inset.Top + inset.Bottom,
+            NativeMethods.SetWindowPos(_hwnd, IntPtr.Zero, x, y, cx, cy,
                 NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
         }
         finally { _selfPositioning = false; }

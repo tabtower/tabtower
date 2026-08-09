@@ -8,7 +8,7 @@
         <TextBlock Text="Zone width, as a share of the screen width:" Foreground="#FFCCCCCC" Margin="0,0,0,4"/>
         <TextBox x:Name="SizeBox" FlowDirection="LeftToRight" TextChanged="Size_Changed"
                  Background="#FF333333" Foreground="White" BorderBrush="#FF555555" Padding="4,2"/>
-        <TextBlock Text="A fraction like 2/7, a percentage like 40%, or a decimal like 0.4 (between 5% and 100%)"
+        <TextBlock Text="A fraction like 2/7, a percentage like 40%, or a decimal like 0.4 (between 5% and 90%)"
                    TextWrapping="Wrap" Foreground="#FF888888" FontSize="11" Margin="0,4,0,0"/>
         <TextBlock x:Name="PreviewText" Foreground="#FF7FB2E5" Margin="0,8,0,0"/>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
