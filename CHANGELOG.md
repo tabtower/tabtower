@@ -11,6 +11,13 @@ to it automatically.
 
 <!-- new releases are inserted directly below this line -->
 
+## v0.9.7 - 2026-08-09
+
+- chore: sync hook script version header to 0.9.7
+- feat(ui): dark native title bar matching the card header (T-0361)
+- docs(claude): remove the hazak-uvaruch chapter (T-0337)
+- docs(claude): add hazak-uvaruch task-finish chapter (T-0337)
+
 ## v0.9.6 - 2026-08-05
 
 - chore: sync hook script version header to 0.9.6
