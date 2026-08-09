@@ -1,7 +1,11 @@
 namespace SessionDeck.Models;
 
 // Order matters: ZoneModeCombo items are mapped by index cast (persistence is by name).
-public enum ZoneMode { Off, QuarterLeft, HalfLeft, HalfRight, QuarterRight, Full, CustomLeft, CustomRight }
+// There is deliberately no full-screen zone: reserving a whole monitor leaves it with no work
+// area, which pins explorer.exe at 100-430% of a core for as long as the app runs (T-0364).
+// A whole monitor for the deck is "zone off + maximize + 📌 pin" instead.
+public enum ZoneMode { Off, QuarterLeft, HalfLeft, HalfRight, QuarterRight, CustomLeft, CustomRight }
+// StageMode.Full is unrelated — it maximizes a VSCode window and touches no appbar.
 public enum StageMode { Full, HalfLeft, HalfRight, Rect }
 
 public static class ModeNames
@@ -13,7 +17,6 @@ public static class ModeNames
         ZoneMode.HalfLeft => "half-left",
         ZoneMode.HalfRight => "half-right",
         ZoneMode.QuarterRight => "quarter-right",
-        ZoneMode.Full => "full",
         ZoneMode.CustomLeft => "custom-left",
         ZoneMode.CustomRight => "custom-right",
         _ => "off",
@@ -28,7 +31,7 @@ public static class ModeNames
             "half-left" => ZoneMode.HalfLeft,
             "half-right" => ZoneMode.HalfRight,
             "quarter-right" => ZoneMode.QuarterRight,
-            "full" => ZoneMode.Full,
+            "full" => ZoneMode.Off,   // migration: the full-screen zone was removed in T-0364
             "custom-left" => ZoneMode.CustomLeft,
             "custom-right" => ZoneMode.CustomRight,
             _ => (ZoneMode)(-1),
@@ -63,6 +66,13 @@ public static class ModeNames
 /// Valid range is 5%..100% of the monitor width.</summary>
 public static class ZoneSizeParser
 {
+    /// <summary>Widest custom zone allowed, as a share of the monitor width. The cap exists so
+    /// the reservation always leaves the monitor a real work area: a zone that takes the whole
+    /// width leaves none, which pins explorer.exe for as long as the app runs (T-0364). The
+    /// cliff is at exactly zero free pixels, so the margin only has to be non-zero — 10% is a
+    /// visible strip rather than a slice nobody can grab.</summary>
+    public const double MaxFraction = 0.9;
+
     public static bool TryParse(string? s, out double fraction)
     {
         fraction = 0;
@@ -88,7 +98,7 @@ public static class ZoneSizeParser
             if (!double.TryParse(s, System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out f)) return false;
         }
-        if (f < 0.05 || f > 1.0) return false;
+        if (f < 0.05 || f > MaxFraction) return false;
         fraction = f;
         return true;
     }
@@ -191,6 +201,12 @@ public class WindowBounds
     public double Y { get; set; }
     public double W { get; set; }
     public double H { get; set; }
+
+    /// <summary>Window was maximized; X/Y/W/H hold the restore bounds. Persisted so that
+    /// "zone off + maximize + 📌 pin" — the way to give the deck a whole monitor since the
+    /// full-screen zone was removed (T-0364) — survives a restart instead of being redone
+    /// on every launch.</summary>
+    public bool Maximized { get; set; }
 }
 
 public class AppConfig

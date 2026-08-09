@@ -29,7 +29,7 @@ Click it, and the deck focuses the VSCode window, reveals that session's tab, an
 - **Session cards** — one sub-card per Claude Code session, with a status-coloured border driven by Claude Code hooks (`idle` / `working` / `waiting` / `done` / `error`). The status → colour/blink mapping lives in config, not in code.
 - **Click to resume** — clicking a session card focuses the VSCode window, activates that session's tab (via the companion extension), and acknowledges the blink. A closed session resumes with its full history.
 - **Windows notifications** — when the deck itself might be buried, a session that needs attention escalates to a native notification and a taskbar badge — and both withdraw the moment the cause is gone, including when you handle it outside the deck.
-- **Reserved Zone** — SessionDeck can claim a quarter, half, all, or any custom fraction (e.g. `2/7`) of a monitor as an AppBar, so maximized windows and snap never cover it. While zoned, the window is locked in place until the zone is turned off.
+- **Reserved Zone** — SessionDeck can claim a quarter, half, or any custom fraction up to 90% (e.g. `2/7`) of a monitor as an AppBar, so maximized windows and snap never cover it. While zoned, the window is locked in place until the zone is turned off. To hand the deck a *whole* monitor, leave the zone off, maximize it and turn 📌 on: a reservation that leaves its monitor no work area at all is accepted by Windows and then sends the shell into a spin, so the deck will not ask for one.
 - **Stage / Pin** — define a target rectangle once, then send any window to it from the UI or the CLI.
 - **Full CLI** — everything is scriptable over a named pipe, with a <100ms round trip so hooks stay cheap.
 - **Starts with Windows** and restores the complete layout, zone and stage.
@@ -134,7 +134,7 @@ sessiondeck set <target> [--title "..."] [--desc "..."] [--color <c>]
 sessiondeck focus <target>               # activate the window in place
 sessiondeck pin <target>                 # move it to the Stage, then activate
 sessiondeck stage --monitor <n> --half left|right | --full | --rect x,y,w,h
-sessiondeck zone  --monitor <n> --half left|right | --quarter left|right | --custom left|right [--size 2/7|40%|0.4] | --full | --off
+sessiondeck zone  --monitor <n> --half left|right | --quarter left|right | --custom left|right [--size 2/7|40%|0.4] | --off
 sessiondeck toggle list | get <id> | set <id> on|off
 sessiondeck tasks [--file <path> | --off]
 sessiondeck status

@@ -211,6 +211,11 @@ public partial class MainWindow : Window
         if (config.Window is { } wb && wb.W > 100 && wb.H > 100)
         {
             Left = wb.X; Top = wb.Y; Width = wb.W; Height = wb.H;
+            // Restore the maximized state too (after Left/Top, so it maximizes on the right
+            // monitor). A whole monitor for the deck is "zone off + maximize + 📌 pin" since
+            // the full-screen zone was removed (T-0364); without this it would have to be
+            // redone on every launch. A zone owns the geometry, so it wins over the state.
+            if (wb.Maximized && Vm.ZoneMode == ZoneMode.Off) WindowState = WindowState.Maximized;
         }
 
         ApplyTasksFile(config.TasksFilePath);   // after workspaces, so task links resolve
@@ -325,8 +330,21 @@ public partial class MainWindow : Window
             }
             cfg.Workspaces.Add(wc);
         }
-        if (Vm.ZoneMode == ZoneMode.Off && WindowState == WindowState.Normal)
-            cfg.Window = new WindowBounds { X = Left, Y = Top, W = Width, H = Height };
+        // Maximized is persisted alongside the restore bounds: it is half of how a user gives
+        // the deck a whole monitor now that the full-screen zone is gone (T-0364), the 📌 pin
+        // being the other half. A zone sets the geometry itself, so nothing is saved under one.
+        if (Vm.ZoneMode == ZoneMode.Off && WindowState is WindowState.Normal or WindowState.Maximized)
+        {
+            bool max = WindowState == WindowState.Maximized;
+            cfg.Window = new WindowBounds
+            {
+                X = max ? RestoreBounds.X : Left,
+                Y = max ? RestoreBounds.Y : Top,
+                W = max ? RestoreBounds.Width : Width,
+                H = max ? RestoreBounds.Height : Height,
+                Maximized = max,
+            };
+        }
         return cfg;
     }
 
@@ -1867,7 +1885,9 @@ public partial class MainWindow : Window
             foreach (var m in _monitors) combo.Items.Add(m.DisplayName);
         }
         ZoneModeCombo.Items.Clear();
-        foreach (var name in new[] { "Off", "Left quarter", "Left half", "Right half", "Right quarter", "Full screen", "Custom left…", "Custom right…" }) ZoneModeCombo.Items.Add(name);
+        // No full-screen zone by design (T-0364) — see the ZoneMode enum. The order must stay
+        // aligned with it: the items are selected by index cast.
+        foreach (var name in new[] { "Off", "Left quarter", "Left half", "Right half", "Right quarter", "Custom left…", "Custom right…" }) ZoneModeCombo.Items.Add(name);
         StageModeCombo.Items.Clear();
         foreach (var name in new[] { "Full screen", "Left half", "Right half", "Rect (CLI)" }) StageModeCombo.Items.Add(name);
         StartupMenuItem.IsChecked = StartupService.IsEnabled();
