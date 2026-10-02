@@ -25,7 +25,7 @@ public sealed class FlowDirectionConverter : IValueConverter
     }
 
     private static bool IsRtl(char c) =>
-        c is >= '֐' and <= '׿'      // Hebrew
+        c is >= '֐' and <= '׿'      // Hebrew block U+0590-U+05FF (public-gate: allow, the range bounds are functional)
           or >= '؀' and <= 'ۿ'      // Arabic
           or >= 'יִ' and <= 'ﭏ';     // Hebrew presentation forms
 

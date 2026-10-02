@@ -5,7 +5,7 @@ using SessionDeck.ViewModels;
 
 namespace SessionDeck;
 
-/// <summary>The collapsed tasks strip (T-0116); actions delegate to MainWindow.</summary>
+/// <summary>The collapsed tasks strip; actions delegate to MainWindow.</summary>
 public partial class TasksStripView : UserControl
 {
     private MainWindow? Owner => Window.GetWindow(this) as MainWindow;

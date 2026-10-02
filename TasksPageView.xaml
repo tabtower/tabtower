@@ -2,7 +2,7 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:SessionDeck">
-    <!-- The tasks page (T-0116, revised design 2026-07-27): replaces the deck's central
+    <!-- The tasks page (revised design 2026-07-27): replaces the deck's central
          area. Right: the full task list. Left: live session squares grouped by workspace
          (same ViewModels as the cards — statuses and blink stay live). Toolbar and status
          bar stay outside and unchanged. DataContext = MainViewModel. -->
@@ -14,6 +14,17 @@
              separator lines meet across the panel border. -->
         <Border DockPanel.Dock="Left" Width="240" Background="#FF1B1B1B"
                 BorderBrush="#FF2E2E2E" BorderThickness="0,0,1,0">
+            <!-- Gone in split view: the real deck is open beside this page, so the rail would
+                 be a second, narrower copy of it. -->
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding TasksPanel.ShowSessionRail}" Value="False">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
             <DockPanel>
                 <Border DockPanel.Dock="Top" MinHeight="32" Padding="10,0"
                         BorderBrush="#FF2E2E2E" BorderThickness="0,0,0,1">
@@ -126,6 +137,74 @@
                        FlowDirection="{Binding TasksPanel.WarningText, Converter={StaticResource Rtl}}"/>
         </Border>
 
+        <!-- right: the tree navigation grid. Docked AFTER the header rows on
+             purpose, so it starts below them and its left border is the fixed vertical
+             separator between the grid and the list. Two vertical columns, not horizontal
+             rows: a single project can have over fifty direct children, which a row cannot hold
+             and a column simply scrolls. Widths are fixed and do NOT follow the A+/A− font
+             scale — the grid is sized to the strip of screen that was free, and a growing
+             square would eat the list instead. -->
+        <Border DockPanel.Dock="Right" Background="#FF1B1B1B" Padding="4,6"
+                BorderBrush="#FF3E3E3E" BorderThickness="1,0,0,0">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Style.Triggers>
+                        <!-- No map in the file (an older producer) = no grid at all. -->
+                        <DataTrigger Binding="{Binding TasksPanel.HasNav}" Value="False">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <Border.Resources>
+                <!-- One template for both columns; the handler tells them apart by which
+                     collection the square belongs to. Fill = structure, border = status. -->
+                <DataTemplate x:Key="NavSquare">
+                    <Border Width="28" Height="28" CornerRadius="4" Margin="0,0,0,4"
+                            Background="{Binding FillBrush}" BorderBrush="{Binding StatusBrush}"
+                            BorderThickness="2" Cursor="Hand" ToolTip="{Binding TooltipText}"
+                            MouseLeftButtonUp="NavSquare_MouseUp">
+                        <TextBlock Text="{Binding Label}" Foreground="White" FontSize="11"
+                                   FlowDirection="LeftToRight"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                </DataTemplate>
+            </Border.Resources>
+            <StackPanel Orientation="Horizontal">
+                <!-- column A: the top level. Fixed, never scrolls, ten squares, with the
+                     "all projects" square above them — the only way out of a tree that does
+                     not mean walking up it a level at a time. -->
+                <StackPanel VerticalAlignment="Top" Margin="0,0,4,0">
+                    <ContentControl Content="{Binding TasksPanel.NavHome}"
+                                    ContentTemplate="{StaticResource NavSquare}"
+                                    Margin="0,0,0,6">
+                        <ContentControl.Style>
+                            <Style TargetType="ContentControl">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding TasksPanel.HasNavHome}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ContentControl.Style>
+                    </ContentControl>
+                    <ItemsControl ItemsSource="{Binding TasksPanel.NavRoots}"
+                                  ItemTemplate="{StaticResource NavSquare}"/>
+                </StackPanel>
+                <!-- column B: the selected root's direct children, in a scroll area of its
+                     own — the wheel over it scrolls the tree, the wheel past the separator
+                     scrolls the tasks, which is WPF's own default and needs no code. The
+                     width is fixed and includes room for the scrollbar, so the list beside
+                     it never shifts sideways when a root with fifty children replaces one
+                     with two. -->
+                <ScrollViewer Width="46" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding TasksPanel.NavChildren}"
+                                  HorizontalAlignment="Left"
+                                  ItemTemplate="{StaticResource NavSquare}"/>
+                </ScrollViewer>
+            </StackPanel>
+        </Border>
+
         <!-- center/right: the task list, or the file-level error state -->
         <Grid>
             <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -138,7 +217,9 @@
                         </Style.Triggers>
                     </Style>
                 </ScrollViewer.Style>
-                <StackPanel Margin="14,8" MaxWidth="700">
+                <!-- 700 before the navigation grid took the right edge: the grid
+                     needs about 90px and only ~68 were free at 700. -->
+                <StackPanel Margin="14,8" MaxWidth="650">
                     <ItemsControl ItemsSource="{Binding TasksPanel.PinnedTasks}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
@@ -166,7 +247,7 @@
                     </ItemsControl>
                 </StackPanel>
             </ScrollViewer>
-            <!-- file-level error replaces the list (T-0116: errors are shown, not hidden) -->
+            <!-- file-level error replaces the list (errors are shown, not hidden) -->
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="520">
                 <StackPanel.Style>
                     <Style TargetType="StackPanel">

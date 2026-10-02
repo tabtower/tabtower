@@ -1,39 +1,31 @@
 <UserControl x:Class="SessionDeck.TaskItemView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- One task card (T-0116): name + optional status/description, action buttons.
+    <!-- One task card: name + optional status/description, action buttons.
          DataContext = TaskItemViewModel. Used by the tasks page and by the workspace
          card's inline task list. -->
+    <!-- The whole card is a click target (not only the buttons), and it carries no tooltip:
+         everything a tooltip would show is already printed on the card. The narrow squares
+         in TasksStripView DO keep theirs - there the tooltip is the only way to read a task. -->
     <Border BorderBrush="{Binding StatusBrush}" BorderThickness="2" CornerRadius="5"
             Margin="0,3" Padding="8,5" Background="#FF262626"
-            ToolTip="{Binding TooltipText}">
+            Cursor="Hand" MouseLeftButtonUp="Card_MouseUp">
         <StackPanel>
+            <!-- Fixed reading order, independent of the task's language: id hard left, then
+                 status, then the name filling the rest and right-aligned. Deriving the header
+                 direction from the name (the Rtl converter) made a Hebrew task and an English
+                 one line up differently, which is what a scan down the list trips over. -->
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <DockPanel FlowDirection="{Binding Name, Converter={StaticResource Rtl}}">
-                    <TextBlock DockPanel.Dock="Left" Text="📌" FontSize="10" Margin="0,1,4,0"
-                               VerticalAlignment="Top">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Pinned}" Value="False">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                    <TextBlock Text="{Binding Name}" Foreground="White" FontSize="12"
-                               FontWeight="SemiBold" TextWrapping="Wrap"/>
-                </DockPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top"
-                            Margin="8,0,0,0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Top" Margin="0,0,8,0">
+                    <TextBlock Text="{Binding Id}" Foreground="#FF777777" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=10}"
+                               VerticalAlignment="Center"/>
                     <!-- status text comes from the external file: direction follows its content -->
-                    <TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontSize="11"
-                               VerticalAlignment="Center"
+                    <TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}"
+                               VerticalAlignment="Center" Margin="8,0,0,0"
                                FlowDirection="{Binding Status, Converter={StaticResource Rtl}}">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
@@ -45,11 +37,66 @@
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
-                    <TextBlock Text="{Binding Id}" Foreground="#FF777777" FontSize="10"
-                               VerticalAlignment="Center" Margin="8,0,0,0"/>
                 </StackPanel>
+                <!-- RightToLeft mirrors layout as well as glyphs, so Dock=Left puts the pin on
+                     the right of the name, which is the side the text now starts from. -->
+                <DockPanel Grid.Column="1" FlowDirection="RightToLeft">
+                    <TextBlock DockPanel.Dock="Left" Text="📌" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=10}" Margin="0,1,4,0"
+                               VerticalAlignment="Top">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Pinned}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <!-- A card that navigates (it has a url: a parent that drills into its
+                         own level, or the producer's back/toggle cards) is painted as a
+                         hyperlink — blue and underlined. The emoji marker a producer may put
+                         in the name was not enough to spot while scanning (feedback
+                         07-08-2026); colour reads before the eye reaches the glyph. -->
+                    <TextBlock Text="{Binding Name}" Foreground="White" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=12}"
+                               FontWeight="SemiBold" TextWrapping="Wrap">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasUrl}" Value="True">
+                                        <Setter Property="Foreground" Value="#FF6FB7FF"/>
+                                        <Setter Property="TextDecorations" Value="Underline"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </DockPanel>
             </Grid>
-            <TextBlock Text="{Binding Description}" Foreground="#FF999999" FontSize="10.5"
+            <!-- The lead line: what this card IS, as opposed to what is happening on it this
+                 week. It is set apart three ways rather than one, because a wall of cards is
+                 scanned rather than read — brighter than the body, a shade warmer than pure
+                 grey, and behind a left rule that ties the wrapped lines together. The rule is
+                 on the Border's Right in an RTL flow, which puts it on the side the text starts
+                 from. Nothing is drawn at all when the producer declares no lead, so every
+                 other view keeps the card it had. -->
+            <Border BorderBrush="#FF5A6572" BorderThickness="2,0,0,0" Padding="6,0,0,0"
+                    Margin="0,4,0,1" HorizontalAlignment="Stretch" FlowDirection="RightToLeft">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding HasLead}" Value="False">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <TextBlock Text="{Binding Lead}" Foreground="#FFE2E6EA" FontWeight="SemiBold"
+                           FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}"
+                           TextWrapping="Wrap" LineHeight="15"
+                           FlowDirection="{Binding Lead, Converter={StaticResource Rtl}}"/>
+            </Border>
+            <TextBlock Text="{Binding Description}" Foreground="#FF999999" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=10.5}"
                        TextWrapping="Wrap" Margin="0,2,0,0"
                        FlowDirection="{Binding Description, Converter={StaticResource Rtl}}">
                 <TextBlock.Style>
@@ -70,7 +117,9 @@
                         <Setter Property="Foreground" Value="#FFDDDDDD"/>
                         <Setter Property="Padding" Value="9,2"/>
                         <Setter Property="Margin" Value="0,0,6,0"/>
-                        <Setter Property="FontSize" Value="11"/>
+                        <!-- Setter.Value takes a binding, so the card's buttons grow with its
+                             text instead of staying behind at a fixed 11. -->
+                        <Setter Property="FontSize" Value="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}"/>
                     </Style>
                 </StackPanel.Resources>
                 <Button x:Name="TargetButton" Content="{Binding TargetButtonText}"
@@ -86,7 +135,11 @@
                         </Style>
                     </Button.Style>
                 </Button>
-                <Button Content="🔗 Open task" Click="Url_Click"
+                <!-- The producer names this button (UrlButtonText): only it knows whether the
+                     url is a document or a drill into this card's sub-tasks. Its text is
+                     external and often Hebrew, so its direction follows the text. -->
+                <Button Content="{Binding UrlButtonText}" Click="Url_Click"
+                        FlowDirection="{Binding UrlButtonText, Converter={StaticResource Rtl}}"
                         ToolTip="{Binding Url}">
                     <Button.Style>
                         <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">

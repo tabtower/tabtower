@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -21,6 +21,47 @@ namespace SessionDeck.Services;
 /// "ai-title" at all gets labelled from a user prompt instead, which no single title field
 /// reproduces (issue 2026-07-20, second report). Matching against the whole candidate set
 /// covers every labelling rule Claude Code uses without having to know which one applied.</param>
+/// <param name="Lost">Set when the transcript's tail carries a task-notification reporting
+/// background agents with no completion record — the session's previous process died with
+/// them still running. No hook carries this: measured 2026-08-14, SessionStart fires seconds
+/// BEFORE the notification is written and carries nothing about it, UserPromptSubmit reports
+/// the user's own prompt rather than the notification, and by then Stop's background_tasks is
+/// empty. The transcript is the only witness.</param>
+/// <param name="ForegroundAgents">Agent calls this session has out that are still running —
+/// the ones dispatched WITHOUT run_in_background, which no hook can report. A background
+/// Agent call answers in milliseconds with async_launched, so it is never pending here; a
+/// foreground one holds its tool_use open for as long as the agent works, and that is exactly
+/// the signal. The subagent's own turns are sidechain lines and are skipped, so its internal
+/// tool calls never inflate the count.</param>
+/// <param name="MonitorTaskIds">The background-task ids this session armed with the Monitor
+/// tool. NOT a liveness signal on its own — a Monitor answers immediately, so its tool_use is
+/// never pending and the transcript never says when the watch ended. It is the missing HALF of
+/// one: the Stop hook's <c>background_tasks</c> says which tasks are still running but reports
+/// a Monitor and a backgrounded shell identically (measured 11-09-2026: both type=shell,
+/// status=running), and this says which of those ids was a Monitor. Intersect the two and you
+/// have the watches that are actually live, which is the only form of the question the deck can
+/// answer honestly.</param>
+/// <param name="JobTaskIds">The background-task ids this session launched as backgrounded Bash
+/// JOBS — the same missing half as <paramref name="MonitorTaskIds"/>, for the other kind of
+/// machine work that ends a turn. A job differs from a Monitor in one way that matters to the
+/// person reading the deck: it is computing and it will finish, where a monitor only listens and
+/// what it listens for may never arrive. Both mean the same thing about the card, which is that
+/// the session is waiting on a machine and not on the user.
+///
+/// What is deliberately NOT here is the reason a background shell counted for nothing until now:
+/// a dev server left up by a session that then genuinely finished with a question would silence
+/// that question forever. So the command text decides — it is in the transcript, keyed by task
+/// id, which the hook payload is not — and a command matching <see cref="ServerCommand"/> is
+/// read as a process nobody is waiting for and counts for nothing, exactly as before. Everything
+/// else backgrounded terminates, and a terminating background task notifies its session, which is
+/// the definition of work that will claim its own turn back.</param>
+/// <param name="EndsOnExit">The last line is a <c>cost-state</c> entry — the CLI writes one
+/// when its process exits and at no other time, so a transcript that ENDS on one belongs to a
+/// session with no process behind it. Unlike every tab-label signal this proves something on
+/// its own, and it survives the one thing a SessionEnd hook does not: the deck being down when
+/// the process went. Measured 28-09-2026 over the 40 newest transcripts on this machine: every
+/// live session ended on something else, every dead one on this, and a resume always appends
+/// <c>bridge-session</c> lines at start, which takes the file off it again.</param>
 /// <param name="Entrypoint">Where this session runs: "claude-vscode" for the VSCode
 /// extension, "cli"/"sdk-cli" for a terminal. Every message line carries it. Only a
 /// VSCode-hosted session may be closed when its VSCode window exits — a terminal session
@@ -35,8 +76,56 @@ public sealed record TranscriptInfo(
     string? AutoTitle,
     PendingCall? Pending = null,
     IReadOnlyList<string>? LabelCandidates = null,
+    LostAgents? Lost = null,
+    TokenUsage? Tokens = null,
+    int ForegroundAgents = 0,
+    IReadOnlyList<string>? MonitorTaskIds = null,
+    IReadOnlyList<string>? JobTaskIds = null,
+    bool EndsOnExit = false,
     string? Entrypoint = null,
     DateTime? LastMessageAtUtc = null);
+
+/// <summary>What a session has spent, tallied from the <c>usage</c> block of every assistant
+/// turn in its transcript.
+///
+/// Carries a raw and a weighted total because on a long session they differ by 5-6x and only
+/// the weighted one means anything: the API bills a cache READ at a tenth of a fresh input
+/// token, and by the twentieth turn the re-read context dwarfs everything else. Measured
+/// 2026-09-08 on a 26-turn Opus session: 3.22M raw, of which 3.10M was cache reads, against
+/// 613k weighted; on a 160-turn one, 59.9M against 10.1M.
+///
+/// The weighted unit is an INPUT-EQUIVALENT token — each line converted at its price ratio to
+/// one base input token of the model that produced it. Deliberately a token count and not
+/// money: those ratios are identical on Opus 5 ($5/$25 per MTok), Sonnet 5 ($2/$10), Haiku 4.5
+/// ($1/$5) and Fable 5 ($10/$50), so one weight table covers every model with no price list,
+/// and a session that mixes models still sums correctly. The one exception is the Fable/Mythos
+/// 5.1 cache read at 0.025x, applied per request.
+///
+/// What it does NOT include: a subagent's own spend. An in-process one writes
+/// <c>isSidechain</c> turns into this same file and is counted, but a BACKGROUND agent — the
+/// kind this fork dispatches — runs as its own process against its own transcript, so its
+/// tokens land on that session's card, not on the one that launched it.</summary>
+/// <param name="ContextNow">The newest request's whole input footprint: what <c>/context</c>
+/// reports as the window's current occupancy. Every earlier request is history.</param>
+/// <param name="ContextWindow">The model's window, to make ContextNow a percentage.</param>
+public sealed record TokenUsage(
+    long Input, long CacheRead, long CacheWrite, long Output,
+    long InputWeighted, long CacheReadWeighted, long CacheWriteWeighted, long OutputWeighted,
+    long ContextNow, long ContextWindow, int Requests)
+{
+    /// <summary>Everything the API counted, unweighted — the impressive, misleading one.</summary>
+    public long Raw => Input + CacheRead + CacheWrite + Output;
+
+    /// <summary>The number to show: input-equivalent tokens, cache discount applied.</summary>
+    public long Weighted => InputWeighted + CacheReadWeighted + CacheWriteWeighted + OutputWeighted;
+}
+
+/// <summary>Background agents that were running when their session's process exited.</summary>
+/// <param name="Count">How many were reported in the one notification.</param>
+/// <param name="Detail">Their descriptions, as the notification names them.</param>
+/// <param name="AtUtc">The notification's own timestamp — the identity of the event, so the
+/// same one is never reported twice by the 10-second scan.</param>
+public sealed record LostAgents(int Count, string Detail, DateTime AtUtc);
 
 /// <summary>A tool call with no tool_result yet — either Claude is blocked on the user,
 /// or the tool is simply still running. <see cref="IsAsk"/> separates the two.</summary>
@@ -47,7 +136,14 @@ public sealed record TranscriptInfo(
 /// <param name="IsAsk">True for AskUserQuestion/ExitPlanMode — an unanswered call is
 /// definitive proof Claude is blocked, no waiting period needed. False for every other
 /// tool, where "no result yet" is indistinguishable from "still executing".</param>
-public sealed record PendingCall(string ToolName, string Detail, DateTime StartedAtUtc, bool IsAsk);
+/// <param name="HasOlderPending">True when another call issued earlier is still pending
+/// too. Claude Code flushes the tool_results of one assistant turn together, so a fast
+/// tool called alongside a slow one (an Agent subagent, a long Bash) shows no result for
+/// as long as its sibling runs. That is not a user block, and ageing it as one is what
+/// pinned cards orange for minutes (measured 2026-08-10: an Edit issued 2s after an Agent
+/// stayed resultless for the Agent's full 3 minutes).</param>
+public sealed record PendingCall(string ToolName, string Detail, DateTime StartedAtUtc, bool IsAsk,
+    bool HasOlderPending = false);
 
 /// <summary>
 /// Single-pass transcript scanner. Best-effort: any parse failure yields nulls and the
@@ -73,9 +169,12 @@ public static class TranscriptReader
     {
         try
         {
-            string? customTitle = null, aiTitle = null, summary = null, firstUserText = null;
+            string? customTitle = null, aiTitle = null, summary = null, firstUserText = null, wrappedFirst = null;
+            LostAgents? lost = null;
             var prompts = new List<string>();
+            var commands = new List<string>();
             var tail = new Queue<string>(TailLines);
+            var tokens = new UsageTally();
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var reader = new StreamReader(stream);
             while (reader.ReadLine() is { } line)
@@ -83,6 +182,10 @@ public static class TranscriptReader
                 if (line.Length == 0) continue;
                 if (tail.Count == TailLines) tail.Dequeue();
                 tail.Enqueue(line);
+                // Its own check rather than a branch of the chain below: an assistant line can
+                // also contain one of those markers inside its own text, and a request missed
+                // that way would silently under-report the total.
+                if (line.Contains(UsageMarker)) tokens.Add(line);
                 if (line.Contains("\"custom-title\""))
                 {
                     // /rename. An empty value (rename cleared) falls back to the ai-title.
@@ -102,10 +205,32 @@ public static class TranscriptReader
                         if (prompts.Count > MaxLabelCandidates) prompts.RemoveAt(0);
                     }
                 }
+                else if (line.Contains(CommandNameOpen))
+                {
+                    // A slash command the user ran. VSCode labels the tab with it, and this
+                    // is the only place it survives — see TryReadCommandName.
+                    if (TryReadCommandName(line) is { } cmd)
+                    {
+                        commands.Remove(cmd);
+                        commands.Add(cmd);
+                        if (commands.Count > MaxLabelCandidates) commands.RemoveAt(0);
+                    }
+                }
+                else if (line.Contains(StoppedMarker))
+                    lost = ReadLostAgents(line) ?? lost;
                 else if (line.Contains("\"summary\""))
                     summary = TryGetString(line, "summary", "summary") ?? summary;
                 else if (firstUserText == null && line.Contains("\"user\""))
-                    firstUserText = TryReadUserText(line);
+                {
+                    if (TryReadUserText(line) is { } raw)
+                    {
+                        firstUserText = UnwrapCrossSession(raw);
+                        // A delivered prompt: the card reads the inner text, but VSCode may well
+                        // label the tab with the envelope it saw as the first prompt — so the raw
+                        // shape stays a label candidate until an ai-title takes over.
+                        if (!ReferenceEquals(firstUserText, raw)) wrappedFirst = raw;
+                    }
+                }
             }
             string? tabTitle = Shorten(customTitle ?? aiTitle);
             string? autoTitle = Shorten(summary ?? firstUserText);
@@ -117,22 +242,229 @@ public static class TranscriptReader
             // one exists. Prompt candidates on a titled session produce false matches: a
             // forked session shares its prompt history with its origin, so the shared
             // prompts made both cards answer to the fork's tab label and the ambiguity
-            // guard blocked auto-acknowledge for both (T-0313 follow-up).
+            // guard blocked auto-acknowledge for both.
             if (tabTitle == null)
             {
                 for (int i = prompts.Count - 1; i >= 0; i--)
                     if (!candidates.Contains(prompts[i])) candidates.Add(prompts[i]);
+                for (int i = commands.Count - 1; i >= 0; i--)
+                    if (!candidates.Contains(commands[i])) candidates.Add(commands[i]);
                 if (autoTitle != null && !candidates.Contains(autoTitle)) candidates.Add(autoTitle);
+                if (Shorten(wrappedFirst) is { } w && !candidates.Contains(w)) candidates.Add(w);
             }
 
+            var (pending, foreground, monitors, jobs) = FindPendingCall(tail);
+            bool endsOnExit = tail.Count > 0 && tail.Last().Contains(ExitMarker);
             var (entrypoint, lastMessageAt) = ReadHostAndLastMessage(tail);
-            return new TranscriptInfo(tabTitle, autoTitle, FindPendingCall(tail), candidates,
+            return new TranscriptInfo(tabTitle, autoTitle, pending, candidates, lost,
+                                      tokens.Result(), foreground, monitors, jobs, endsOnExit,
                                       entrypoint, lastMessageAt);
         }
         catch
         {
             return new TranscriptInfo(null, null);
         }
+    }
+
+    /// <summary>Cheap pre-filter for an assistant turn's token counts, same idea as
+    /// StoppedMarker. On the largest transcript here (33.8 MB) only 160 lines get past it, so
+    /// the tally costs about 50 ms on a file the scanner was already reading end to end.</summary>
+    private const string UsageMarker = "\"usage\"";
+
+    /// <summary>The entry the CLI appends as its process exits (see TranscriptInfo.EndsOnExit).</summary>
+    private const string ExitMarker = "\"type\":\"cost-state\"";
+
+    /// <summary>Running token totals for one transcript. Weights are applied per request, at
+    /// the ratios of the model that served it — see <see cref="TokenUsage"/>.</summary>
+    private sealed class UsageTally
+    {
+        /// <summary>Price ratios against one base input token of the SAME model, in per-mille
+        /// so the tally stays integer arithmetic.</summary>
+        private const long ScaleOne = 1000;
+        private const long WeightCacheRead = 100;       // 0.1x
+        private const long WeightCacheReadFable = 25;   // 0.025x — Fable/Mythos 5.1 only
+        private const long WeightWrite5m = 1250;        // 1.25x
+        private const long WeightWrite1h = 2000;        // 2x
+        private const long WeightOutput = 5000;         // 5x, on every current model
+
+        /// <summary>One API request is written as SEVERAL transcript lines — one per content
+        /// block (thinking, text, tool_use) — each repeating the same usage object verbatim.
+        /// Without deduping on the request id a turn that thinks and calls a tool counts three
+        /// times: measured 2026-09-08, 50 usage lines for 26 actual requests.</summary>
+        private readonly HashSet<string> _seen = new();
+
+        private long _in, _read, _write, _out;
+        private long _inW, _readW, _writeW, _outW;
+        private long _ctxNow, _ctxWindow;
+
+        public void Add(string line)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement;
+                if (!root.TryGetProperty("type", out var type) || type.GetString() != "assistant") return;
+                if (!root.TryGetProperty("message", out var msg)) return;
+                if (!msg.TryGetProperty("usage", out var usage)) return;
+
+                string id = root.TryGetProperty("requestId", out var rid) ? rid.GetString() ?? "" : "";
+                if (id.Length == 0 && msg.TryGetProperty("id", out var mid)) id = mid.GetString() ?? "";
+                if (id.Length == 0 || !_seen.Add(id)) return;
+
+                string model = msg.TryGetProperty("model", out var m) ? m.GetString() ?? "" : "";
+                long input = Num(usage, "input_tokens");
+                long read = Num(usage, "cache_read_input_tokens");
+                long output = Num(usage, "output_tokens");
+
+                long write5m = 0, write1h = 0;
+                if (usage.TryGetProperty("cache_creation", out var split) &&
+                    split.ValueKind == JsonValueKind.Object)
+                {
+                    write5m = Num(split, "ephemeral_5m_input_tokens");
+                    write1h = Num(split, "ephemeral_1h_input_tokens");
+                }
+                // No TTL split (older entries, or a shape that only carries the total): charge
+                // the whole write at the 5-minute rate, which is the API's own default.
+                if (write5m + write1h == 0) write5m = Num(usage, "cache_creation_input_tokens");
+
+                _in += input;
+                _read += read;
+                _write += write5m + write1h;
+                _out += output;
+
+                long readWeight = IsFableFamily(model) ? WeightCacheReadFable : WeightCacheRead;
+                _inW += input;
+                _readW += read * readWeight / ScaleOne;
+                _writeW += (write5m * WeightWrite5m + write1h * WeightWrite1h) / ScaleOne;
+                _outW += output * WeightOutput / ScaleOne;
+
+                // Overwritten every request on purpose: what the window holds NOW is the last
+                // one's input footprint, which is the number /context reports.
+                _ctxNow = input + read + write5m + write1h;
+                _ctxWindow = model.Contains("haiku", StringComparison.OrdinalIgnoreCase)
+                    ? 200_000 : 1_000_000;
+            }
+            catch { }
+        }
+
+        public TokenUsage? Result() => _seen.Count == 0
+            ? null
+            : new TokenUsage(_in, _read, _write, _out, _inW, _readW, _writeW, _outW,
+                             _ctxNow, _ctxWindow, _seen.Count);
+
+        private static bool IsFableFamily(string model) =>
+            model.Contains("fable", StringComparison.OrdinalIgnoreCase) ||
+            model.Contains("mythos", StringComparison.OrdinalIgnoreCase);
+
+        private static long Num(JsonElement obj, string name) =>
+            obj.TryGetProperty(name, out var v) && v.TryGetInt64(out long n) ? n : 0;
+    }
+
+    /// <summary>The one string that identifies a lost-agent notification. Checked against the
+    /// raw line before any parsing, because every other line in the file has to pay for it.</summary>
+    private const string StoppedMarker = "<status>stopped</status>";
+
+    /// <summary>Cheap pre-filter for a slash-command prompt, same idea as StoppedMarker.</summary>
+    private const string CommandNameOpen = "<command-name>";
+
+    private static readonly Regex CommandNameTag =
+        new("<command-name>\\s*(/?[^<\\s][^<]*)</command-name>", RegexOptions.Compiled);
+
+    /// <summary>The slash command a prompt invoked, e.g. <c>/review-queue</c> — a label
+    /// candidate, never a title.
+    ///
+    /// VSCode labels a titleless session's tab with its first prompt, and for a session
+    /// opened by a slash command that prompt IS the command name. Nothing else in the
+    /// transcript reproduces it: the matching "last-prompt" entry is written with no
+    /// lastPrompt field at all, and TryReadUserText rejects the wrapper on purpose (it is
+    /// markup, not a sentence). The tab therefore matched no candidate, and to the orphan
+    /// sweep "no tab answers to this session" means the host died — a live session the user
+    /// was working in was closed after 15 idle minutes, and its card vanished from the deck
+    /// (issue 2026-08-16, a tab labelled with a slash command).
+    ///
+    /// Titles are unaffected: the card still displays the human prompt, and the command name
+    /// surfaces only if it is what the tab is actually showing.</summary>
+    private static string? TryReadCommandName(string line)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("type", out var type) || type.GetString() != "user") return null;
+            if (!root.TryGetProperty("message", out var message) ||
+                !message.TryGetProperty("content", out var content)) return null;
+            string? text = content.ValueKind switch
+            {
+                JsonValueKind.String => content.GetString(),
+                JsonValueKind.Array => content.EnumerateArray()
+                    .Where(e => e.TryGetProperty("type", out var t) && t.GetString() == "text")
+                    .Select(e => e.TryGetProperty("text", out var txt) ? txt.GetString() : null)
+                    .FirstOrDefault(t => t != null),
+                _ => null,
+            };
+            if (text == null) return null;
+            var m = CommandNameTag.Match(text);
+            return m.Success ? Shorten(m.Groups[1].Value) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The agent names inside the notification's summary, e.g.
+    /// <c>... for 2 background agents from the previous session: "Re-measure the backlog
+    /// delta" (a4bab...), "Measure git delivery gap" (abd27...)</c>.</summary>
+    private static readonly Regex QuotedName = new("\"([^\"]{1,80})\"", RegexOptions.Compiled);
+
+    /// <summary>A task-notification saying background agents have no completion record: their
+    /// session's process exited while they were still running. One notification covers all of
+    /// them, so its own timestamp is the event's identity — the scan re-reads the same tail
+    /// every 10 seconds and must not report it again.</summary>
+    private static LostAgents? ReadLostAgents(string line)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            // Claude Code labels the injected message: origin.kind == "task-notification" on a
+            // user entry, with the XML as a plain string. Both halves are checked because
+            // WHOSE text this is decides everything — the first cut matched any line
+            // containing the marker and lit up a session that was merely DISCUSSING a lost
+            // agent, off its own tool output. Rejected by this: assistant prose (type
+            // assistant), tool results (content is an array), and the queue-operation twin of
+            // the same notification, which would otherwise fire a second time on its own
+            // timestamp.
+            if (!root.TryGetProperty("type", out var kind) || kind.GetString() != "user") return null;
+            if (root.TryGetProperty("origin", out var origin) &&
+                origin.TryGetProperty("kind", out var originKind) &&
+                originKind.GetString() != "task-notification")
+                return null;
+            if (!root.TryGetProperty("message", out var message) ||
+                !message.TryGetProperty("content", out var content) ||
+                content.ValueKind != JsonValueKind.String)
+                return null;
+            string text = content.GetString() ?? "";
+            if (!text.TrimStart().StartsWith("<task-notification>", StringComparison.Ordinal)) return null;
+            if (!text.Contains(StoppedMarker)) return null;   // the marker was elsewhere in the line
+            int count = 0;
+            for (int i = text.IndexOf("<task-id>", StringComparison.Ordinal); i >= 0;
+                 i = text.IndexOf("<task-id>", i + 1, StringComparison.Ordinal)) count++;
+            // The summary quotes each agent's description. Nothing quoted (a wording change
+            // upstream) still leaves a usable card - the count is the load-bearing half.
+            var names = new List<string>();
+            int summaryAt = text.IndexOf("<summary>", StringComparison.Ordinal);
+            if (summaryAt >= 0)
+                foreach (Match m in QuotedName.Matches(text[summaryAt..]))
+                    if (!names.Contains(m.Groups[1].Value)) names.Add(m.Groups[1].Value);
+            DateTime stamp = root.TryGetProperty("timestamp", out var ts) &&
+                             DateTime.TryParse(ts.GetString(), null,
+                                 System.Globalization.DateTimeStyles.AdjustToUniversal |
+                                 System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed)
+                ? parsed : DateTime.UtcNow;
+            return new LostAgents(Math.Max(count, 1), string.Join(", ", names), stamp);
+        }
+        catch { return null; }
     }
 
     /// <summary>Walk the tail newest-first for the two root-level fields the sweeps need:
@@ -176,12 +508,32 @@ public static class TranscriptReader
     /// a threshold first, since a running tool looks identical. Sidechain (subagent) lines
     /// are ignored — only the main conversation can block the user. A later human prompt
     /// clears earlier pending calls: "Fork conversation" copies history but drops some
-    /// tool_result lines (parallel-call siblings off the parentUuid chain, T-0313), so an
-    /// orphaned tool_use mid-history would otherwise read as pending forever.</summary>
-    private static PendingCall? FindPendingCall(IEnumerable<string> tail)
+    /// tool_result lines (parallel-call siblings off the parentUuid chain), so an
+    /// orphaned tool_use mid-history would otherwise read as pending forever.
+    ///
+    /// The same walk answers a second question: how many of the still-open calls are Agent
+    /// calls, which is the only witness there is to a FOREGROUND subagent (see
+    /// TranscriptInfo.ForegroundAgents) — and a third, the background-task ids armed by the
+    /// Monitor tool (see TranscriptInfo.MonitorTaskIds) or backgrounded as a Bash job (see
+    /// TranscriptInfo.JobTaskIds).</summary>
+    private static (PendingCall? Call, int ForegroundAgents, List<string> MonitorTasks,
+                    List<string> JobTasks)
+        FindPendingCall(IEnumerable<string> tail)
     {
         var pending = new Dictionary<string, PendingCall>();
         var order = new List<string>();
+        // tool_use_id → tool name, kept for the whole walk. `pending` cannot serve: a Monitor
+        // call is answered at once, so it is removed from `pending` by the very result that
+        // carries the task id we are after.
+        var toolNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        var monitorTasks = new List<string>();
+        // tool_use_id → the command of a Bash call that ran in the background, and the launches
+        // that announced a task id, joined AFTER the walk rather than during it. A tool_use whose
+        // result was already seen is skipped below (`resolved`), so a same-second flush reorder
+        // would lose the command of the very call being classified; and only the join needs both
+        // halves, so nothing is gained by insisting they arrive in order.
+        var bgCommands = new Dictionary<string, string>(StringComparer.Ordinal);
+        var bgLaunches = new List<(string TaskId, string UseId)>();
         // Transcript lines are NOT strictly ordered: a tool_result line can precede its
         // own tool_use line (seen in the wild 2026-07-27 — same-second flush). Matching
         // must therefore be order-insensitive, or the call reads as pending forever and
@@ -218,7 +570,15 @@ public static class TranscriptReader
                             sawToolBlock = true;
                             string? name = block.TryGetProperty("name", out var n) ? n.GetString() : null;
                             string? id = block.TryGetProperty("id", out var i) ? i.GetString() : null;
+                            if (name == "Bash" && id != null &&
+                                block.TryGetProperty("input", out var bin) &&
+                                bin.TryGetProperty("run_in_background", out var bg) &&
+                                bg.ValueKind == JsonValueKind.True &&
+                                bin.TryGetProperty("command", out var bcmd) &&
+                                bcmd.GetString() is { Length: > 0 } bText)
+                                bgCommands[id] = bText;
                             if (name == null || id == null || resolved.Contains(id)) continue;
+                            toolNames[id] = name;
                             bool isAsk = AskTools.Contains(name);
                             string detail = isAsk ? AskDetail(name, block) : $"Waiting for permission: {name}";
                             pending[id] = new PendingCall(name, detail, stamp, isAsk);
@@ -232,6 +592,12 @@ public static class TranscriptReader
                             {
                                 resolved.Add(rId);
                                 pending.Remove(rId);
+                                if (toolNames.GetValueOrDefault(rId) == "Monitor" &&
+                                    ReadMonitorTaskId(block) is { } taskId &&
+                                    !monitorTasks.Contains(taskId))
+                                    monitorTasks.Add(taskId);
+                                if (ReadBackgroundTaskId(block) is { } bgId)
+                                    bgLaunches.Add((bgId, rId));
                             }
                         }
                     }
@@ -247,15 +613,96 @@ public static class TranscriptReader
             }
             catch { }
         }
+        int agents = 0;
+        foreach (var p in pending.Values)
+            if (p.ToolName == "Agent") agents++;
+
+        // The join. A backgrounded command that terminates notifies its session when it does,
+        // so it is work the session will claim its own turn back from; a server never does, and
+        // is the one shape that must go on counting for nothing.
+        var jobTasks = new List<string>();
+        foreach (var (taskId, useId) in bgLaunches)
+            if (bgCommands.TryGetValue(useId, out var cmd) &&
+                !ServerCommand.IsMatch(cmd) &&
+                !jobTasks.Contains(taskId) &&
+                !monitorTasks.Contains(taskId))
+                jobTasks.Add(taskId);
+
         // Prefer a definitive question over a merely-unfinished tool, then most recent.
         for (int i = order.Count - 1; i >= 0; i--)
             if (pending.TryGetValue(order[i], out var call) && call.IsAsk)
-                return call;
+                return (call, agents, monitorTasks, jobTasks);
         for (int i = order.Count - 1; i >= 0; i--)
             if (pending.TryGetValue(order[i], out var call))
-                return call;
-        return null;
+            {
+                // Is anything issued before it still pending? Then this call is most
+                // likely waiting on its own batch, not on the user — see HasOlderPending.
+                bool older = false;
+                for (int j = 0; j < i && !older; j++) older = pending.ContainsKey(order[j]);
+                return (call with { HasOlderPending = older }, agents, monitorTasks, jobTasks);
+            }
+        return (null, agents, monitorTasks, jobTasks);
     }
+
+    /// <summary>The task id out of a Monitor tool_result: "Monitor started (task blosa44ck,
+    /// timeout 300000ms)". The id lives only in that sentence — the result carries no
+    /// structured field — so this reads prose, and is written to fail closed: no match means
+    /// no watch is counted, which is exactly the behaviour of every build before this one.
+    /// Only results whose own tool_use was a Monitor call reach here, so nothing a shell
+    /// command happens to print can be mistaken for one.</summary>
+    private static string? ReadMonitorTaskId(JsonElement block)
+    {
+        if (ResultText(block) is not { } text) return null;
+        var m = MonitorTaskPattern.Match(text);
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    /// <summary>The text of a tool_result, which the transcript writes either as a bare string
+    /// or as a content array.</summary>
+    private static string? ResultText(JsonElement block)
+    {
+        if (!block.TryGetProperty("content", out var content)) return null;
+        return content.ValueKind switch
+        {
+            JsonValueKind.String => content.GetString(),
+            JsonValueKind.Array => content.EnumerateArray()
+                .Select(b => b.ValueKind == JsonValueKind.Object &&
+                             b.TryGetProperty("text", out var t) ? t.GetString() : null)
+                .FirstOrDefault(x => x is { Length: > 0 }),
+            _ => null,
+        };
+    }
+
+    private static readonly Regex MonitorTaskPattern =
+        new(@"Monitor started \(task ([A-Za-z0-9_-]+)",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>The task id a backgrounded Bash call was given, read from the same tool_result
+    /// that announces it. The launch is the only place the id and the command meet: the Stop
+    /// hook's background_tasks carries the id and a free-text description, never the command,
+    /// which is why the deck could not tell a deploy run from a dev server without this.</summary>
+    private static string? ReadBackgroundTaskId(JsonElement block)
+    {
+        if (ResultText(block) is not { } text) return null;
+        var m = BackgroundTaskPattern.Match(text);
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    private static readonly Regex BackgroundTaskPattern =
+        new(@"[Cc]ommand running in background with ID: ([A-Za-z0-9_-]+)",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>A backgrounded command that is expected to run until something kills it, rather
+    /// than to finish and wake its session. The narrow exclusion list is the whole safety margin
+    /// of counting background jobs at all, so it stays a list of shapes that genuinely never
+    /// return — a dev server, a watcher, a follow — and never widens into "long-running".
+    /// A command that is merely slow is exactly the case the card is meant to cover.</summary>
+    private static readonly Regex ServerCommand =
+        new(@"\b(npm|pnpm|yarn|bun)\s+(run\s+)?(dev|start|serve|watch)\b" +
+            @"|\bnext\s+dev\b|\bnodemon\b|\bvite\b(?!\s+build)|\bwebpack(-dev)?-server\b" +
+            @"|\bhttp-server\b|\bserve\b\s|\brun-dev-instance\b|\bdotnet\s+watch\b" +
+            @"|\btail\s+(-[A-Za-z]*f|--follow)\b|--watch\b|\bGet-Content\b[^|]*-Wait\b",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     /// <summary>Card text for a pending question: the question itself when available.</summary>
     private static string AskDetail(string toolName, JsonElement block)
@@ -312,7 +759,7 @@ public static class TranscriptReader
             using var doc = JsonDocument.Parse(line);
             var root = doc.RootElement;
             if (!root.TryGetProperty("type", out var type) || type.GetString() != "user") return null;
-            if (root.TryGetProperty("isMeta", out var meta) && meta.ValueKind == JsonValueKind.True) return null;
+            bool isMeta = root.TryGetProperty("isMeta", out var meta) && meta.ValueKind == JsonValueKind.True;
             if (!root.TryGetProperty("message", out var message) ||
                 !message.TryGetProperty("content", out var content)) return null;
 
@@ -325,14 +772,44 @@ public static class TranscriptReader
                     .FirstOrDefault(t => t != null),
                 _ => null,
             };
+            if (text == null) return null;
+            // A message another session delivered is written with isMeta=true — Claude Code
+            // files it as harness-injected, which it is, but for THIS session it is the opening
+            // prompt (a relay script hands a successor its instruction this way, 05-09-2026: a
+            // card titled only by its session id was the first one to show why). Every other meta entry
+            // stays rejected.
+            string inner = UnwrapCrossSession(text);
+            bool delivered = !ReferenceEquals(inner, text);
+            if (isMeta && !delivered) return null;
             // Command wrappers (<command-name>, <system-reminder>, caveats) aren't real prompts.
-            if (text == null || text.StartsWith('<') || text.StartsWith("Caveat:")) return null;
+            // Judged on the text INSIDE the envelope; the raw text is returned so the caller can
+            // keep both shapes (see UnwrapCrossSession).
+            if (inner.StartsWith('<') || inner.StartsWith("Caveat:")) return null;
             return text;
         }
         catch
         {
             return null;
         }
+    }
+
+    private static readonly Regex CrossSessionHead =
+        new(@"^\s*(Another Claude session sent a message:\s*)?<cross-session-message\b[^>]*>\s*", RegexOptions.Compiled);
+    // From the closing tag to the END: the harness appends its own guidance to the receiving
+    // session after the envelope ("This came from another Claude session — not typed by your
+    // user…"), which is not part of what was said either.
+    private static readonly Regex CrossSessionTail = new(@"\s*</cross-session-message>[\s\S]*$", RegexOptions.Compiled);
+
+    /// <summary>A prompt another session DELIVERED (the SendMessage tool — for example the way
+    /// a relay script hands a successor its instruction) is recorded wrapped in an
+    /// envelope naming the sender. The envelope is plumbing: the card's title is what was said,
+    /// so it is stripped here. Returns the input itself when there is no envelope.</summary>
+    private static string UnwrapCrossSession(string text)
+    {
+        var m = CrossSessionHead.Match(text);
+        if (!m.Success) return text;
+        string inner = CrossSessionTail.Replace(text[m.Length..], "");
+        return inner.Length > 0 ? inner : text;
     }
 
     private static string? Shorten(string? title)

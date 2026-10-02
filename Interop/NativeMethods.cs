@@ -127,6 +127,7 @@ public static class NativeMethods
     public const uint SWP_SHOWWINDOW = 0x0040;
     public const int WM_WINDOWPOSCHANGING = 0x0046;
     public const int WM_SYSCOMMAND = 0x0112;
+    public const int WM_DPICHANGED = 0x02E0;
     public const long SC_SIZE = 0xF000;
     public const long SC_MOVE = 0xF010;
     public const long SC_MAXIMIZE = 0xF030;
@@ -176,6 +177,62 @@ public static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    /// <summary>The window the user is actually in right now. Paired with the extension's
+    /// own "my window has focus" report, this is what identifies WHICH VSCode window a
+    /// connector lives in - no pid can (see GetParentProcessId below).</summary>
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    // ---- process parentage (which VSCode window an extension host belongs to) ----
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessBasicInformation
+    {
+        public IntPtr Reserved1;
+        public IntPtr PebBaseAddress;
+        public IntPtr Reserved2_0;
+        public IntPtr Reserved2_1;
+        public IntPtr UniqueProcessId;
+        public IntPtr InheritedFromUniqueProcessId;
+    }
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtQueryInformationProcess(IntPtr handle, int infoClass,
+        ref ProcessBasicInformation info, int size, out int returned);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(int access, [MarshalAs(UnmanagedType.Bool)] bool inherit, int pid);
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    private const int PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+    /// <summary>Parent process id, or 0 if it can't be read.
+    ///
+    /// For a VSCode extension host this resolves the VSCode INSTANCE, not the window: the
+    /// host is a utility child of the Electron MAIN process, and every window of that
+    /// instance reports that same main process as its own owner. Measured 22-08-2026: four
+    /// windows and four extension hosts, one pid (53380) for all eight. It looked like a
+    /// window id on 21-08 only because the second window was a second INSTANCE with its
+    /// own main process. Window identity comes from focus correlation instead
+    /// (MainWindow.CorrelateConnectorWindow); this still separates instances.</summary>
+    public static int GetParentProcessId(int pid)
+    {
+        if (pid <= 0) return 0;
+        IntPtr handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (handle == IntPtr.Zero) return 0;
+        try
+        {
+            var info = new ProcessBasicInformation();
+            if (NtQueryInformationProcess(handle, 0, ref info, Marshal.SizeOf(info), out _) != 0) return 0;
+            return (int)info.InheritedFromUniqueProcessId;
+        }
+        catch { return 0; }
+        finally { CloseHandle(handle); }
+    }
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
@@ -367,7 +424,7 @@ public struct ICONINFO
 /// Only <see cref="SetOverlayIcon"/> is used; every member before it is a vtable
 /// placeholder and must stay in ITaskbarList → ITaskbarList2 → ITaskbarList3 order.
 /// </summary>
-[ComImport, Guid("ea1afb91-9e28-4b86-90e9-9e9f8a5eefaf"),
+[ComImport, Guid("ea1afb91-9e28-4b86-90e9-9e9f8a5eefaf"), // public-gate: allow (the documented ITaskbarList3 IID, not a session id)
  InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 public interface ITaskbarList3
 {

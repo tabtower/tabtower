@@ -21,6 +21,9 @@ Windows only, and it needs the Claude Code extension for VS Code.
   and on every change.
 - Handles SessionDeck's requests to open or resume a session, revealing the tab through
   Claude Code's own editor command (falling back to `claude --resume` in a terminal).
+- Closes a session's tab on request, locating it through the same editor command and
+  refusing (with a line in the Output channel) whenever the tab cannot be identified
+  with certainty.
 
 The pipe is polled with a reconnect, so the order the app and VS Code start in doesn't
 matter, and closing SessionDeck is harmless.

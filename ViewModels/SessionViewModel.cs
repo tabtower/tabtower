@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
 using SessionDeck.Models;
@@ -6,7 +6,19 @@ using SessionDeck.Services;
 
 namespace SessionDeck.ViewModels;
 
-public enum SessionStatus { Idle, Working, Waiting, Done, Error }
+/// <summary>
+/// <c>Replaced</c> (this fork, v0.9.61): the session handed its work to a successor and its own
+/// process was then killed, which is exactly what a relay script that hands a session over to
+/// a successor does. A killed process
+/// fires no <c>SessionEnd</c>, so without an explicit mark the card kept whatever its last
+/// turn left (usually <c>done</c>) and was indistinguishable from a live session waiting for
+/// the user, while its dead tab still sat in VSCode under the same label as the successor's.
+/// Like <c>wrapped</c> it is set from outside only (<c>session status --state replaced</c>) and no
+/// quieter hook may overwrite it; unlike <c>wrapped</c> the session behind it is GONE, so the
+/// scanner never infers a wait for it and the orphan sweep closes it within seconds of its
+/// tab disappearing instead of after the fifteen-minute TTL.
+/// </summary>
+public enum SessionStatus { Idle, Working, Waiting, Done, Error, Wrapped, Replaced }
 
 public static class SessionStatusNames
 {
@@ -17,7 +29,19 @@ public static class SessionStatusNames
         SessionStatus.Waiting => "waiting",
         SessionStatus.Done => "done",
         SessionStatus.Error => "error",
+        SessionStatus.Wrapped => "wrapped",
+        SessionStatus.Replaced => "replaced",
         _ => "idle",
+    };
+
+    /// <summary>The word the card shows. Only Done differs from the wire name: it marks the end
+    /// of a turn, not the end of the work, and "done" reads as the second — it was taken for
+    /// "this task is finished" on a session that was mid-task and just waiting for a reply.
+    /// The wire name is deliberately left alone, so hooks, the config and the CLI keep matching.</summary>
+    public static string ToDisplay(SessionStatus s) => s switch
+    {
+        SessionStatus.Done => "your turn",
+        _ => ToName(s),
     };
 
     public static bool TryParse(string s, out SessionStatus status)
@@ -29,6 +53,8 @@ public static class SessionStatusNames
             "waiting" => SessionStatus.Waiting,
             "done" => SessionStatus.Done,
             "error" => SessionStatus.Error,
+            "wrapped" => SessionStatus.Wrapped,
+            "replaced" => SessionStatus.Replaced,
             _ => (SessionStatus)(-1),
         };
         return (int)status >= 0;
@@ -70,6 +96,11 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
     /// <summary>Transcript mtime already scanned for titles (not persisted).</summary>
     public DateTime TranscriptScannedAt { get; set; }
 
+    /// <summary>When the transcript was last written, if what was written last is the CLI's
+    /// exit record (TranscriptInfo.EndsOnExit); null otherwise. Local time, so it compares
+    /// with LastEventAt. Runtime only — the next scan after a restart fills it again.</summary>
+    public DateTime? ExitRecordedAt { get; set; }
+
     /// <summary>Strings VSCode could be showing as this session's tab label — titles plus
     /// recent prompts. Correlation matches the label against all of them, because which one
     /// Claude Code picked isn't knowable from here (issue 2026-07-20). Runtime only.</summary>
@@ -78,7 +109,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
     /// <summary>The "waiting" status may only be cleared by the transcript scanner, when
     /// the answer shows up. Set for waits the scanner inferred itself (issue 2026-07-20)
     /// and for the PermissionRequest hook, which has no "dialog closed" counterpart to
-    /// resolve it (T-0318). Waits from any other hook are cleared by their own hook.
+    /// resolve it. Waits from any other hook are cleared by their own hook.
     /// Runtime only.</summary>
     public bool WaitingFromTranscript { get; set; }
 
@@ -87,7 +118,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
     /// from clearing the wait off a PendingCall it hasn't read yet, and marks the call as
     /// blocking without ageing. The stored mark is what bounds the hold: the moment
     /// TranscriptScannedAt moves off it, a scan has read the file since the dialog opened
-    /// and PendingCall can be trusted. Runtime only (T-0318).</summary>
+    /// and PendingCall can be trusted. Runtime only.</summary>
     public DateTime? PermissionDialogScanMark { get; set; }
 
     /// <summary>StartedAtUtc of the pending call a PermissionRequest hook was matched to.
@@ -109,20 +140,42 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
     /// (ApplyHookInfo) and whenever the condition clears. Runtime only.</summary>
     public DateTime? OrphanSince { get; set; }
 
-    /// <summary>Which host runs this session, per the transcript's "entrypoint" field:
-    /// "claude-vscode", "cli", "sdk-cli". Decides whether a closing VSCode window may take
-    /// the session with it — a terminal session in the same folder must survive it
-    /// (decision 13). Null = not scanned yet; treated as "not proven VSCode".</summary>
-    public string? Entrypoint { get; set; }
+    /// <summary>When this session's own tab was WATCHED leaving VSCode — the exact label it
+    /// was matched against left the tab union while the same windows stayed connected. That
+    /// is a different claim from "no tab answers to its titles", and a much stronger one: it
+    /// cannot be produced by a label-match failure, because the string being looked for is
+    /// the one the tab itself was showing a moment earlier. The orphan sweep gives this shape
+    /// its own short TTL, so a card stops outliving the tab the user closed by a quarter of
+    /// an hour. Cleared by any hook event and whenever the tab comes back. Runtime only.</summary>
+    public DateTime? TabGoneAt { get; set; }
+
+    /// <summary>The deck itself resumed this session in a TERMINAL (see OpenSessionInVscode).
+    /// Such a session legitimately lives with no tab of its own, so the tab witness above
+    /// must not be read as death for it. Runtime only.</summary>
+    public bool ResumedInTerminal { get; set; }
+
+    /// <summary>How many times the deck has asked the extension to close this `replaced`
+    /// session's dead tab, and when it last did. Bounded so a window whose extension cannot
+    /// (an old version, a label that does not match) is asked a few times and then left alone
+    /// — every ask reveals the tab, and an endless flicker is worse than a tab left open.
+    /// Runtime only.</summary>
+    public int CloseTabAttempts { get; set; }
+    public DateTime? CloseTabRequestedAt { get; set; }
 
     /// <summary>Timestamp of the last real conversation event in the transcript. The file's
-    /// own mtime is not a substitute — Claude Code rewrites the file with a timestampless
+    /// own mtime is not a substitute: Claude Code rewrites the file with a timestampless
     /// "last-prompt" record on tab open/close, which looks like activity and kept resetting
-    /// the orphan clock (issue 2026-08-09).</summary>
+    /// the orphan clock. Persisted, so LastActivity is right before the first scan.</summary>
     public DateTime? LastMessageAtUtc { get; set; }
 
     /// <summary>Discovered from the transcripts folder (expanded view) — not persisted.</summary>
     public bool Historical { get; init; }
+
+    /// <summary>This session has already been counted in its card's UseCount. Runtime only,
+    /// and true for every session restored from config: the count is a lifetime total the
+    /// card persists, so a restored session must not be counted twice on its next event.
+    /// Not a persisted field because that is the only thing it has to prevent.</summary>
+    public bool CountedForUsage { get; set; }
 
     private bool _phantom;
     /// <summary>An idle session whose transcript file was never created — an empty
@@ -215,14 +268,136 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
         set { if (_permissionMode != value) { _permissionMode = value; Raise(); } }
     }
 
+    private string? _entrypoint;
+    /// <summary>CLAUDE_CODE_ENTRYPOINT, forwarded by the hook. Not in the hook payload —
+    /// the hook reads it off its own environment (see hooks/README.md).</summary>
+    public string? Entrypoint
+    {
+        get => _entrypoint;
+        set { if (_entrypoint != value) { _entrypoint = value; Raise(); Raise(nameof(IsHeadless)); } }
+    }
+
+    /// <summary>Nobody opened this session by hand: a scheduled task or a runner fired
+    /// `claude --print`, and its hooks are indistinguishable from a real session's.
+    ///
+    /// Deliberately a blacklist of the SDK entrypoints (`sdk-cli`, `sdk-ts`, `sdk-py`) rather
+    /// than a whitelist of the interactive ones. The two failure directions are not equal:
+    /// an unknown entrypoint treated as interactive shows a card the user may not want, which
+    /// is merely today's behaviour, while an unknown entrypoint treated as headless would
+    /// silently swallow a session the user is waiting on. Precision over coverage.
+    ///
+    /// The inherited-variable hole this used to call "harmless" was not: a `claude --print`
+    /// launched from inside an IDE session reports claude-vscode, and a batch of them lands on
+    /// the card as four sessions the user can click, resume and be blinked at, none of which
+    /// the user started (reported 18-08-2026). <see cref="PrintMode"/> closes it from the other side —
+    /// the process's own command line — and is ORed in here.</summary>
+    public bool IsHeadless =>
+        _printMode || (_entrypoint != null && _entrypoint.StartsWith("sdk", StringComparison.OrdinalIgnoreCase));
+
+    private bool _printMode;
+    /// <summary>This session is a `claude -p` run: nobody opened it, and there is nothing to
+    /// interact with. Proven by the hook from the claude process's own command line, not from
+    /// the environment, which a spawned run inherits from whoever spawned it. Sticky and
+    /// persisted: a process cannot stop being a print run, and a restart must not un-hide a
+    /// batch of runs that is still going.</summary>
+    public bool PrintMode
+    {
+        get => _printMode;
+        set { if (_printMode != value) { _printMode = value; Raise(); Raise(nameof(IsHeadless)); } }
+    }
+
     private string? _endReason;
     public string? EndReason
     {
         get => _endReason;
-        set { if (_endReason != value) { _endReason = value; Raise(nameof(TooltipText)); Raise(nameof(StatusText)); } }
+        set { if (_endReason != value) { _endReason = value; Raise(nameof(TooltipText)); Raise(nameof(StatusText)); Raise(nameof(StatusDisplay)); } }
     }
 
     public DateTime? LastEventAt { get; set; }
+
+    private string _groupId = "";
+    /// <summary>Id of the VSCode instance this session was last seen running in, "" while
+    /// unknown. Written by the deck when the session's tab is found in a window whose title
+    /// carries a group's marker, and then kept — a window that closed does not un-say where
+    /// its sessions were, and that record is the whole point.</summary>
+    public string GroupId
+    {
+        get => _groupId;
+        set
+        {
+            if (_groupId == value) return;
+            _groupId = value;
+            Raise();
+            Raise(nameof(GroupLabel));
+            Raise(nameof(HasGroup));
+            Raise(nameof(TooltipText));
+        }
+    }
+
+    private string _groupName = "";
+    /// <summary>The group's human name, kept for the tooltip and the status bar. Runtime only:
+    /// re-resolved from config on every stamp, so a renamed group needs no migration.</summary>
+    public string GroupName
+    {
+        get => _groupName;
+        set
+        {
+            if (_groupName == value) return;
+            _groupName = value;
+            Raise();
+            Raise(nameof(TooltipText));
+        }
+    }
+
+    private string _groupColor = "";
+    /// <summary>The group's chip colour, from its config. "" draws in the ordinary card grey.</summary>
+    public string GroupColor
+    {
+        get => _groupColor;
+        set
+        {
+            if (_groupColor == value) return;
+            _groupColor = value;
+            Raise();
+            Raise(nameof(GroupBrush));
+        }
+    }
+
+    private int _groupOrder = int.MaxValue;
+    /// <summary>This group's position in the configured list, so the card can keep all of one
+    /// window's sessions together in a STABLE order. Sorting by group id would order them
+    /// alphabetically (green, orange, purple), which is not necessarily the order they are
+    /// read in.
+    /// Ungrouped sessions sort last, which on a card with no groups is every session and
+    /// therefore changes nothing.</summary>
+    public int GroupOrder
+    {
+        get => _groupOrder;
+        set { if (_groupOrder != value) { _groupOrder = value; Raise(); } }
+    }
+
+    private bool _showGroupHeader;
+    /// <summary>This row opens a new window's block, so the card draws a heading above it.
+    /// Recomputed after every sort; false on every card that has no groups, which is usually
+    /// all of them but one.</summary>
+    public bool ShowGroupHeader
+    {
+        get => _showGroupHeader;
+        set { if (_showGroupHeader != value) { _showGroupHeader = value; Raise(); } }
+    }
+
+    public bool HasGroup => _groupId.Length > 0;
+
+    /// <summary>What the chip says: the window's COLOUR NAME, capitalised — "Purple", "Green",
+    /// "Orange". Instances marked by colour are called by their colour, so the chip uses those
+    /// words; the group ids already are those words, so nothing needs mapping. A group
+    /// whose id is not a colour simply shows its id, which is still the best name it has.</summary>
+    public string GroupLabel => _groupId.Length == 0 ? ""
+        : char.ToUpperInvariant(_groupId[0]) + _groupId[1..];
+
+    /// <summary>The chip's colour: the window's own, so the card is read at a glance rather
+    /// than decoded. Everything else on the row stays the ordinary grey.</summary>
+    public Brush GroupBrush => MakeBrush(_groupColor.Length > 0 ? _groupColor : "#BBBBBB");
 
     private bool _openAsTab;
     /// <summary>Best-effort: a Claude tab with a matching label is open in VSCode (stage D).
@@ -230,7 +405,9 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
     public bool OpenAsTab
     {
         get => _openAsTab;
-        set { if (_openAsTab != value) { _openAsTab = value; Raise(); } }
+        // StatusDisplay reads it for a `replaced` card: "close its tab" is only said while a
+        // tab is actually there to close.
+        set { if (_openAsTab != value) { _openAsTab = value; Raise(); Raise(nameof(StatusDisplay)); Raise(nameof(TooltipText)); } }
     }
 
     // Trimmed by request 2026-07-19: previously also showed SessionId, source,
@@ -241,9 +418,30 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
         {
             var lines = new List<string>();
             if (_detail.Length > 0) lines.Add(_detail);
-            lines.Add($"started: {StartedAt:HH:mm:ss}");
-            if (LastEventAt is { } le) lines.Add($"last event: {le:HH:mm:ss}");
-            if (EndedAt is { } ea) lines.Add($"ended: {ea:HH:mm:ss}" + (_endReason != null ? $" ({_endReason})" : ""));
+            if (AgentsRunning > 0) lines.Add(AgentsTip);
+            if (_dispatchedRuns > 0) lines.Add(DispatchedRunsTip);
+            if (ActiveWatches > 0) lines.Add(WatchesTip);
+            if (ActiveJobs > 0) lines.Add(JobsTip);
+            // First of the chips' lines when it fires: it is the only one that says the card's
+            // own content may be untrustworthy.
+            if (_forked) lines.Insert(0, ForkedTip);
+            if (_lostAgents > 0) lines.Add(LostAgentsTip);
+            // Headline only — the ⛁ chip's own tooltip carries the breakdown.
+            if (_tokens is { Requests: > 0 } tk)
+                lines.Add($"tokens: {Compact(tk.Weighted)} effective ({Compact(tk.Raw)} raw)");
+            // Where it runs, before the clocks: with three same-folder instances this is
+            // the first thing to know about a card, and nothing else records it.
+            if (HasGroup) lines.Add($"window: {GroupLabel}");
+            // Date added 2026-08-11: a bare clock reads as "today" even when the event
+            // was yesterday. Seconds dropped — the minute is the useful resolution here.
+            lines.Add($"started: {StartedAt:HH:mm d'/'M}");
+            if (LastEventAt is { } le) lines.Add($"last event: {le:HH:mm d'/'M}");
+            if (EndedAt is { } ea) lines.Add($"ended: {ea:HH:mm d'/'M}" + (_endReason != null ? $" ({_endReason})" : ""));
+            if (_endedTabOpen) lines.Add("its VSCode tab is still open — nothing is running behind it");
+            if (!_closed && _status == SessionStatus.Replaced)
+                lines.Add(_openAsTab
+                    ? "closed itself after handing off to a new session — nothing runs behind its tab; close the tab and this card goes away"
+                    : "closed itself after handing off to a new session — this card goes away on the next sweep");
             return string.Join(Environment.NewLine, lines);
         }
     }
@@ -261,6 +459,479 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
         }
     }
 
+    private int _backgroundAgents;
+    /// <summary>Subagents still running in the background. Two sources, in this order: the
+    /// PostToolUse on each dispatched Agent counts UP as it is launched (v0.9.44 — the
+    /// leading edge, so the chip appears with the agents rather than at the end of the turn),
+    /// and the Stop hook's <c>background_tasks</c> snapshot then overwrites the tally with the
+    /// truth. Hooks are the only signal there is: a background Agent call returns its id in
+    /// milliseconds, so the transcript shows a finished tool call and the scanner sees nothing
+    /// to wait for. While it is non-zero the card stays "working" instead of claiming the
+    /// user's turn. Not persisted — after a deck restart the session's next Stop refills
+    /// it.</summary>
+    public int BackgroundAgents
+    {
+        get => _backgroundAgents;
+        set
+        {
+            if (_backgroundAgents == value) return;
+            _backgroundAgents = value;
+            Raise();
+            RaiseAgentChip();
+        }
+    }
+
+    private int _foregroundAgents;
+    /// <summary>Subagents running in the FOREGROUND — an Agent call made without
+    /// run_in_background, which holds the session's turn until it comes back. No hook reports
+    /// these and none can: Stop's <c>background_tasks</c> lists only background tasks, and the
+    /// PostToolUse that counts a launch fires for a foreground agent only once it has already
+    /// FINISHED. So the card showed nothing at all while four verification agents ran for eight
+    /// minutes, right after the session had announced them in chat — blue
+    /// "working" with no chip is indistinguishable from a session doing nothing.
+    ///
+    /// Read from the transcript instead, where a foreground Agent call sits as an unresolved
+    /// tool_use for exactly as long as the agent works. Not persisted and never tallied: every
+    /// scan recomputes it, so a crash, a deck restart or a killed agent cannot leave it stuck.
+    /// Unlike <see cref="BackgroundAgents"/> it does NOT hold the turn — it cannot: while a
+    /// foreground agent runs the turn has not ended, so no Stop has claimed the user's turn
+    /// yet.</summary>
+    public int ForegroundAgents
+    {
+        get => _foregroundAgents;
+        set
+        {
+            if (_foregroundAgents == value) return;
+            _foregroundAgents = value;
+            Raise();
+            RaiseAgentChip();
+        }
+    }
+
+    private void RaiseAgentChip()
+    {
+        Raise(nameof(AgentsRunning));
+        Raise(nameof(HasAgents));
+        Raise(nameof(AgentsText));
+        Raise(nameof(AgentsTip));
+        Raise(nameof(TooltipText));
+    }
+
+    private string? _dispatchedBy;
+    /// <summary>The session that launched this one as a headless `claude -p` run (a dispatched
+    /// run). The process tree cannot say it: such a run is fired through a hidden `wscript`
+    /// launcher whose own parent has exited by the time anyone looks, so the launching session is
+    /// nowhere in the child's ancestry (measured 18-08-2026). The launcher stamps it instead, and
+    /// the hook forwards it. Persisted, so a deck restart mid-run does not lose the link.</summary>
+    public string? DispatchedBy
+    {
+        get => _dispatchedBy;
+        set { if (_dispatchedBy != value) { _dispatchedBy = value; Raise(); } }
+    }
+
+    private int _dispatchedRuns;
+    /// <summary>How many headless runs this session launched are still going. Counted from the
+    /// live session records rather than tallied, so nothing drifts: a run that ends, is closed,
+    /// or is swept as an orphan leaves the count by itself. Deliberately does NOT hold the turn
+    /// the way <see cref="BackgroundAgents"/> does — a dispatched run reports back on its own
+    /// channel, not into the session, so the session's turn really has ended and the card must
+    /// keep saying so.</summary>
+    public int DispatchedRuns
+    {
+        get => _dispatchedRuns;
+        set
+        {
+            if (_dispatchedRuns == value) return;
+            _dispatchedRuns = value;
+            Raise();
+            Raise(nameof(HasDispatchedRuns));
+            Raise(nameof(DispatchedRunsText));
+            Raise(nameof(DispatchedRunsTip));
+            Raise(nameof(TooltipText));
+            Raise(nameof(WaitingOnWaves));
+            Raise(nameof(WaitingOnMachine));
+            Raise(nameof(StatusDisplay));
+            // The count is what silences the blink on a `done` card (see BlinkActive), so a
+            // change to it has to repaint the border. The engine's own tick would catch it
+            // within 100ms; this makes it the same frame.
+            Raise(nameof(BorderBrush));
+        }
+    }
+
+    /// <summary>Subagents and dispatched runs get a chip each, and that is a change from the
+    /// one shared 🤖 they used to share. They answer the same question from the deck's side -
+    /// is anything of mine still running - but not the same question from the user's: a
+    /// subagent comes back INTO the session, a dispatched run reports back on its own channel
+    /// and leaves the session free to be waiting on the user. Reading which of the two is out
+    /// decides whether the user needs to walk over to that window, and a merged count meant
+    /// opening the tooltip every time.
+    ///
+    /// Foreground and background subagents DO share one 🤖, because on that question they give
+    /// the same answer: agents of this session are out, it will come back on its own, leave it
+    /// alone. The card's own colour already separates them — blue means the turn is still open
+    /// and the agents are foreground, purple means the turn ended and only background ones can
+    /// still be out — so a second glyph would split a distinction the border already
+    /// draws.</summary>
+    public int AgentsRunning => _backgroundAgents + _foregroundAgents;
+
+    public bool HasAgents => AgentsRunning > 0;
+
+    /// <summary>The chip on the card: the icon alone for one, icon + count for more.</summary>
+    public string AgentsText => AgentsRunning > 1 ? $"🤖{AgentsRunning}" : "🤖";
+
+    public string AgentsTip => _backgroundAgents > 0 && _foregroundAgents > 0
+        ? $"{AgentsRunning} subagents are still running ({_foregroundAgents} holding the turn, {_backgroundAgents} in the background) — the session comes back on its own"
+        : _foregroundAgents > 0
+            ? _foregroundAgents == 1
+                ? "1 subagent is still running — the session is blocked on it and resumes by itself when it returns"
+                : $"{_foregroundAgents} subagents are still running — the session is blocked on them and resumes by itself when they return"
+            : _backgroundAgents == 1
+                ? "1 subagent is still running — the session resumes on its own when it reports back"
+                : $"{_backgroundAgents} subagents are still running — the session resumes on its own when they report back";
+
+    public bool HasDispatchedRuns => _dispatchedRuns > 0;
+
+    /// <summary>The dispatched-runs chip. 🌊 rather than a second 🤖 because these are not agents
+    /// of this session at all: they are sessions of their own.</summary>
+    public string DispatchedRunsText => _dispatchedRuns > 1 ? $"🌊{_dispatchedRuns}" : "🌊";
+
+    public string DispatchedRunsTip =>
+        _dispatchedRuns == 1
+            ? "1 headless run it launched is still going — it reports back on its own, not into the session, so this card is not blinking for you"
+            : $"{_dispatchedRuns} headless runs it launched are still going — they report back on their own, not into the session, so this card is not blinking for you";
+
+    private IReadOnlyList<string> _liveTaskIds = Array.Empty<string>();
+    /// <summary>The ids of the background SHELL tasks still running when the last turn ended,
+    /// straight off the Stop hook's <c>background_tasks</c>. Meaningless on its own and
+    /// deliberately not shown anywhere: a Monitor armed to wake the session and an
+    /// `npm run dev` nobody will ever look at again are the same record here (measured
+    /// 11-09-2026 — both type=shell, status=running, separated only by free text). Half of
+    /// <see cref="ActiveWatches"/>; the other half comes from the transcript.
+    ///
+    /// PERSISTED, unlike the agent counts and unlike this field in 0.9.82, which is the bug that
+    /// shipped: a session waiting on a monitor emits no hook at all until the monitor wakes it,
+    /// so a restart had nothing to refill this from and the card went back to blinking purple on
+    /// every install. The next Stop still overwrites it, which is what keeps a stale list from
+    /// outliving its turn — the hook sends this even when it is empty.</summary>
+    public IReadOnlyList<string> LiveTaskIds
+    {
+        get => _liveTaskIds;
+        set
+        {
+            if (_liveTaskIds.SequenceEqual(value)) return;
+            _liveTaskIds = value;
+            RaiseWatchChip();
+        }
+    }
+
+    private IReadOnlyList<string> _monitorTaskIds = Array.Empty<string>();
+    /// <summary>The task ids this session armed with the Monitor tool, read from the
+    /// transcript (see TranscriptInfo.MonitorTaskIds). The transcript cannot say whether a
+    /// watch is still up — a Monitor is answered immediately and its end is never written —
+    /// so this is only the type half of the answer.</summary>
+    public IReadOnlyList<string> MonitorTaskIds
+    {
+        get => _monitorTaskIds;
+        set
+        {
+            if (_monitorTaskIds.SequenceEqual(value)) return;
+            _monitorTaskIds = value;
+            RaiseWatchChip();
+        }
+    }
+
+    /// <summary>Watches this session has out: the background tasks still running that the
+    /// transcript attributes to a Monitor call. Neither source can answer alone — the hook
+    /// knows what is alive but not what it is, the transcript knows what it is but not
+    /// whether it is alive — and the intersection is the only honest reading of "this
+    /// session is waiting on a machine, not on the user".
+    ///
+    /// A background shell that is not a Monitor is not counted HERE — since 0.9.95 it is counted
+    /// as a job instead (see <see cref="ActiveJobs"/>), which keeps the two kinds of outstanding
+    /// work apart on the card. What has not changed is the thing the original refusal was
+    /// protecting: a dev server left up by a session that then genuinely finishes with a question
+    /// must never silence that question, so a server-shaped command is still attributed to
+    /// nothing and its card behaves exactly as it did before any of this existed.</summary>
+    public int ActiveWatches =>
+        _monitorTaskIds.Count == 0 || _liveTaskIds.Count == 0
+            ? 0
+            : _liveTaskIds.Count(id => _monitorTaskIds.Contains(id));
+
+    public bool HasWatches => ActiveWatches > 0;
+
+    private IReadOnlyList<string> _jobTaskIds = Array.Empty<string>();
+    /// <summary>The task ids this session backgrounded as Bash JOBS, read from the transcript
+    /// (see TranscriptInfo.JobTaskIds). Same shape as <see cref="MonitorTaskIds"/> and the same
+    /// half of the same answer: what the task IS, with the hook saying whether it is alive.</summary>
+    public IReadOnlyList<string> JobTaskIds
+    {
+        get => _jobTaskIds;
+        set
+        {
+            if (_jobTaskIds.SequenceEqual(value)) return;
+            _jobTaskIds = value;
+            RaiseWatchChip();
+        }
+    }
+
+    /// <summary>Background jobs of this session that are still running: the intersection again,
+    /// minus anything already counted as a watch.
+    ///
+    /// This is the half of "waiting on a machine" that 0.9.82 left out, and the omission was
+    /// measured on two sessions' cards the same evening (12-09-2026):
+    /// both sat purple saying "your turn" while a backgrounded deploy-prep run was still going,
+    /// because neither had used the Monitor tool and a plain background shell counted for
+    /// nothing. The rule that kept it at nothing was right about the danger and too wide about
+    /// the remedy — the thing that must not silence a question is a server that never returns,
+    /// not every backgrounded command — and the command text, which only the transcript has,
+    /// separates the two. See TranscriptInfo.JobTaskIds.</summary>
+    public int ActiveJobs =>
+        _jobTaskIds.Count == 0 || _liveTaskIds.Count == 0
+            ? 0
+            : _liveTaskIds.Count(id => _jobTaskIds.Contains(id) && !_monitorTaskIds.Contains(id));
+
+    public bool HasJobs => ActiveJobs > 0;
+
+    /// <summary>The job chip. Its own again rather than a second 📡, for the reason dispatched
+    /// runs got one: a monitor listens for something that may never come, a job is computing and will
+    /// finish, and which of those is out decides whether waiting is worth anything.</summary>
+    public string JobsText => ActiveJobs > 1 ? $"⚙{ActiveJobs}" : "⚙";
+
+    // ---- two processes on one session ----
+
+    private int _hookPid;               // the CLI process whose events the deck is seeing now
+    private int _priorHookPid;          // the one it replaced
+    private DateTime _forkEvidenceAt;   // when the two last alternated
+    private bool _forked;
+
+    /// <summary>Two CLI processes are writing this one session, and both are alive.
+    ///
+    /// A session id is meant to name exactly one process. When it names two they both append to
+    /// the same transcript, the conversation FORKS, and each half answers the user without
+    /// knowing the other exists — measured 12-09-2026 on one session whose transcript carries two
+    /// parallel parent chains from one node, twenty minutes apart, both writing replies into the
+    /// same tab. Nothing already in the deck could see it: the hooks, the card, the status
+    /// machine and the transcript scanner are all keyed on the session id, which is identical by
+    /// construction, and the transcript is the victim rather than the witness. It was found the
+    /// only way left - the user being asked the same question twice.
+    ///
+    /// The evidence is the hook's CLAUDE_PID, which is CONSTANT across every event of a session,
+    /// subagent events included (probed the same night: one pid over SessionStart, PreToolUse,
+    /// SubagentStart, SubagentStop and Stop with a background agent out). So a second pid is
+    /// never a subagent and always a second process.</summary>
+    public bool ForkedProcesses
+    {
+        get => _forked;
+        private set
+        {
+            if (_forked == value) return;
+            _forked = value;
+            Raise();
+            Raise(nameof(ForkedTip));
+            Raise(nameof(StatusDisplay));
+            Raise(nameof(BorderBrush));
+            Raise(nameof(TooltipText));
+        }
+    }
+
+    /// <summary>How long the mark outlives its last proof. A fork ends when one of the two
+    /// processes exits, and nothing announces that: the survivor simply keeps talking. So the
+    /// mark is evidence-based and expires on silence from the other side rather than on a
+    /// process query — a pid outlives its process and Windows recycles them, which is how an
+    /// ancestor walk once called a live session someone else's subagent.</summary>
+    private static readonly TimeSpan ForkEvidenceTtl = TimeSpan.FromMinutes(10);
+
+    /// <summary>Record which CLI process fired this event. Returns true only the first time it
+    /// can prove there are two, so the caller logs once rather than on every event.
+    ///
+    /// The test is ALTERNATION, never "the pid changed": a resume, an auto-update relaunch and a
+    /// crash-and-restart all change it legitimately, and on 12-09-2026 twenty of them did in one
+    /// evening on ten healthy sessions. What a clean handover can never do is speak again with
+    /// the OLD pid after the new one has taken over. Deliberately no liveness check to decide
+    /// it: that would need the process table, and precision here is worth more than speed —
+    /// a false alarm on this card teaches the user to ignore the one mark that means their work
+    /// is being split in two.</summary>
+    public bool NoteHookPid(int pid)
+    {
+        if (pid <= 0) return false;
+        if (_hookPid == 0) { _hookPid = pid; return false; }
+        if (pid == _hookPid)
+        {
+            if (_forked && DateTime.Now - _forkEvidenceAt > ForkEvidenceTtl) ForkedProcesses = false;
+            return false;
+        }
+        if (pid == _priorHookPid)
+        {
+            _forkEvidenceAt = DateTime.Now;
+            (_hookPid, _priorHookPid) = (pid, _hookPid);
+            bool firstProof = !_forked;
+            ForkedProcesses = true;
+            return firstProof;
+        }
+        // An ordinary handover. The process that was speaking is remembered for exactly one
+        // more generation, which is all the alternation test needs.
+        _priorHookPid = _hookPid;
+        _hookPid = pid;
+        return false;
+    }
+
+    /// <summary>Forget both pids — for a session that genuinely restarted (a `startup` or
+    /// `clear` SessionStart), where nothing from the previous incarnation still applies.</summary>
+    public void ClearHookPids()
+    {
+        _hookPid = 0;
+        _priorHookPid = 0;
+        ForkedProcesses = false;
+    }
+
+    public int HookPid => _hookPid;
+    public int PriorHookPid => _priorHookPid;
+
+    public string ForkedTip =>
+        $"TWO processes are writing this session (pids {_hookPid} and {_priorHookPid}). They share one " +
+        "transcript, so the conversation has split in two and each half answers you without seeing the " +
+        "other. Decide which one to keep and close the other; nothing here does it for you.";
+
+    public string JobsTip => ActiveJobs == 1
+        ? "1 background job it started is still running — it wakes the session when it finishes, so this card is not asking for you"
+        : $"{ActiveJobs} background jobs it started are still running — they wake the session when they finish, so this card is not asking for you";
+
+    /// <summary>The watch chip. 📡 rather than a third 🤖 or a second 🌊 because it answers a
+    /// different question again: nothing of this session's is computing, it is listening, and
+    /// the thing it listens for may never come.</summary>
+    public string WatchesText => ActiveWatches > 1 ? $"📡{ActiveWatches}" : "📡";
+
+    public string WatchesTip => ActiveWatches == 1
+        ? "1 monitor it armed is still watching — an event wakes the session by itself, so this card is not asking for you"
+        : $"{ActiveWatches} monitors it armed are still watching — an event wakes the session by itself, so this card is not asking for you";
+
+    private void RaiseWatchChip()
+    {
+        Raise(nameof(ActiveWatches));
+        Raise(nameof(HasWatches));
+        Raise(nameof(WatchesText));
+        Raise(nameof(WatchesTip));
+        Raise(nameof(ActiveJobs));
+        Raise(nameof(HasJobs));
+        Raise(nameof(JobsText));
+        Raise(nameof(JobsTip));
+        Raise(nameof(WaitingOnJob));
+        Raise(nameof(WaitingOnWatch));
+        Raise(nameof(WaitingOnMachine));
+        Raise(nameof(StatusDisplay));
+        Raise(nameof(TooltipText));
+        Raise(nameof(BorderBrush));
+    }
+
+    private int _lostAgents;
+    private string _lostAgentsDetail = "";
+
+    /// <summary>Background agents that died with this session's previous process, read from
+    /// the task-notification in its transcript (no hook reports it). Cleared when the session
+    /// does something again — the mark is about the gap, not a permanent scar.</summary>
+    public int LostAgents => _lostAgents;
+
+    /// <summary>The notification's own timestamp, so the 10-second scan reports it once.
+    /// Runtime only.</summary>
+    public DateTime? LostAgentsAt { get; private set; }
+
+    public void SetLostAgents(int count, string detail, DateTime atUtc)
+    {
+        _lostAgents = count;
+        _lostAgentsDetail = detail;
+        LostAgentsAt = atUtc;
+        RaiseLostVisuals();
+    }
+
+    public void ClearLostAgents()
+    {
+        if (_lostAgents == 0 && LostAgentsAt == null) return;
+        _lostAgents = 0;
+        _lostAgentsDetail = "";
+        LostAgentsAt = null;
+        RaiseLostVisuals();
+    }
+
+    private void RaiseLostVisuals()
+    {
+        Raise(nameof(LostAgents));
+        Raise(nameof(HasLostAgents));
+        Raise(nameof(LostAgentsText));
+        Raise(nameof(LostAgentsTip));
+        Raise(nameof(TooltipText));
+    }
+
+    public bool HasLostAgents => _lostAgents > 0;
+
+    public string LostAgentsText => _lostAgents > 1 ? $"⚠{_lostAgents}" : "⚠";
+
+    public string LostAgentsTip
+    {
+        get
+        {
+            string head = _lostAgents == 1
+                ? "1 background agent was still running when this session's process exited"
+                : $"{_lostAgents} background agents were still running when this session's process exited";
+            string names = _lostAgentsDetail.Length > 0 ? Environment.NewLine + _lostAgentsDetail : "";
+            return head + names + Environment.NewLine +
+                   "Their transcripts are on disk — nothing was lost, but nothing finished either.";
+        }
+    }
+
+    private TokenUsage? _tokens;
+
+    /// <summary>What this session has spent, from the transcript scan. Not persisted: the
+    /// scanner recomputes it from the file, so a deck restart refills it on the next pass.
+    /// </summary>
+    public TokenUsage? Tokens
+    {
+        get => _tokens;
+        set
+        {
+            if (_tokens == value) return;   // record: value equality, so an unchanged tally is free
+            _tokens = value;
+            Raise(nameof(HasTokens));
+            Raise(nameof(TokensText));
+            Raise(nameof(TokensTip));
+            Raise(nameof(TooltipText));
+        }
+    }
+
+    public bool HasTokens => _tokens is { Requests: > 0 };
+
+    /// <summary>The chip: the effective total, cache discount applied. The raw count is 5-6x
+    /// larger and would say nothing except "this session has been going a while".</summary>
+    public string TokensText => _tokens is { } t ? "⛁" + Compact(t.Weighted) : "";
+
+    public string TokensTip
+    {
+        get
+        {
+            if (_tokens is not { Requests: > 0 } t) return "";
+            var lines = new List<string>
+            {
+                $"{Compact(t.Weighted)} tokens over {t.Requests} turn{(t.Requests == 1 ? "" : "s")}, " +
+                $"charged as input-equivalent — {Compact(t.Raw)} raw, but a cache read bills at a tenth",
+                $"    cache reads {Compact(t.CacheRead)} → {Compact(t.CacheReadWeighted)}  ·  " +
+                $"cache writes {Compact(t.CacheWrite)} → {Compact(t.CacheWriteWeighted)}  ·  " +
+                $"output {Compact(t.Output)} → {Compact(t.OutputWeighted)}  ·  " +
+                $"fresh input {Compact(t.Input)}",
+            };
+            if (t.ContextWindow > 0)
+                lines.Add($"    context now: {Compact(t.ContextNow)} of {Compact(t.ContextWindow)} " +
+                          $"({t.ContextNow * 100 / t.ContextWindow}%)");
+            return string.Join(Environment.NewLine, lines);
+        }
+    }
+
+    /// <summary>Token counts at card width: 52, 6.1k, 614k, 10.1M. Three significant figures
+    /// is both as much as fits and as much as means anything here.</summary>
+    private static string Compact(long n) =>
+        n >= 1_000_000 ? (n / 1_000_000d).ToString("0.#") + "M"
+        : n >= 10_000 ? (n / 1_000d).ToString("0") + "k"
+        : n >= 1_000 ? (n / 1_000d).ToString("0.#") + "k"
+        : n.ToString();
+
     private bool _acknowledged;
     public bool Acknowledged
     {
@@ -275,6 +946,24 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
         set { if (_closed != value) { _closed = value; RaiseVisuals(); } }
     }
 
+    private bool _endedTabOpen;
+    /// <summary>This session is closed, VSCode still shows a tab that answers to it, and no
+    /// live session does. The card stays in the normal view saying exactly that — see
+    /// MainWindow.RefreshEndedTabs for why silence was the worse answer. Runtime only,
+    /// re-derived on every sync.</summary>
+    public bool EndedTabOpen
+    {
+        get => _endedTabOpen;
+        set
+        {
+            if (_endedTabOpen == value) return;
+            _endedTabOpen = value;
+            Raise();
+            Raise(nameof(StatusDisplay));
+            Raise(nameof(TooltipText));
+        }
+    }
+
     public DateTime StartedAt { get; set; }
     public DateTime? EndedAt { get; set; }
 
@@ -286,9 +975,73 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
         set { if (_visible != value) { _visible = value; Raise(); } }
     }
 
-    public string StatusText => Closed
-        ? "closed" + (_endReason is { Length: > 0 } r ? $" ({r})" : "")
-        : SessionStatusNames.ToName(_status);
+    /// <summary>The protocol name — what the CLI prints and what a script may match on.</summary>
+    public string StatusText => Closed ? ClosedLabel : SessionStatusNames.ToName(_status);
+
+    /// <summary>What the card shows. Same states, friendlier words; see ToDisplay.
+    /// "closed (other)" is the protocol wording and answers the wrong question for a card
+    /// left standing only because its tab is still open — there, say what the user needs to
+    /// decide: nothing is running behind that tab. A `replaced` card whose tab is still open
+    /// says what to DO about it, for the same reason.</summary>
+    public string StatusDisplay =>
+        Closed ? (EndedTabOpen ? "ended · tab open" : ClosedLabel)
+               // Ahead of every other state on purpose: while two processes write one session,
+               // what the card would otherwise say about it is a report on one of two halves.
+               : ForkedProcesses ? "2 processes · forked"
+               : _status == SessionStatus.Replaced && _openAsTab ? "replaced · close its tab"
+               : WaitingOnWaves ? (_dispatchedRuns > 1 ? $"{_dispatchedRuns} runs dispatched" : "run dispatched")
+               : WaitingOnWatch ? (ActiveWatches > 1 ? $"watching, {ActiveWatches} monitors" : "watching")
+               : WaitingOnJob ? (ActiveJobs > 1 ? $"{ActiveJobs} jobs running" : "job running")
+               : SessionStatusNames.ToDisplay(_status);
+
+    /// <summary>The turn really has ended, but what it is waiting for is a machine, not the user.
+    /// Silencing the blink was not enough (seen on a session that had dispatched a headless run
+    /// and armed a monitor: a session should ask for the user only when it needs the user). The
+    /// deck is read by COLOUR: a wall of cards is scanned for purple, and a purple card saying
+    /// "your turn" is a request for the user whether or not it blinks. So the card stops claiming
+    /// the user's turn entirely while a dispatched run of its own is still going - it takes the
+    /// dispatched-runs chip's own colour and says what it is actually waiting for. The status underneath is untouched and still `done`; this is a
+    /// presentation rule, exactly like the blink suppression it extends.</summary>
+    public bool WaitingOnWaves => !_closed && _status == SessionStatus.Done && _dispatchedRuns > 0;
+
+    /// <summary>The same rule for a session whose turn ended with a Monitor still armed. This
+    /// was the measured heart of the problem, not an extrapolation of it: one session's
+    /// dispatched run finished at 04:26, the count fell to zero, the card went straight back to
+    /// purple "your turn", and the session woke itself off its monitor at 04:30 (11-09-2026).
+    /// Four minutes of a card asking for the user while the session sat waiting for a machine.
+    ///
+    /// Only monitors: a background JOB gets <see cref="WaitingOnJob"/> instead, so the card can
+    /// say which kind of work is out. Until 0.9.95 it got nothing at all — see
+    /// <see cref="ActiveJobs"/> for the two cards that measured the gap.</summary>
+    public bool WaitingOnWatch => !_closed && _status == SessionStatus.Done && ActiveWatches > 0;
+
+    /// <summary>The same rule for a background job. Separate from <see cref="WaitingOnWatch"/>
+    /// only so the card can say which it is; the colour is shared, because the question a wall of
+    /// cards is scanned for has one answer.</summary>
+    public bool WaitingOnJob => !_closed && _status == SessionStatus.Done && ActiveJobs > 0;
+
+    /// <summary>The turn ended, but what it is waiting for is a machine. One flag over both
+    /// cases because on the question the deck's colour answers — is this card asking for me —
+    /// a dispatched run and a monitor say the same thing, and a wall of cards is read by
+    /// scanning for purple. The chips (🌊 / 📡) carry the difference for anyone who wants it.</summary>
+    public bool WaitingOnMachine => WaitingOnWaves || WaitingOnWatch || WaitingOnJob;
+
+    /// <summary>The colour a card takes while it waits on a machine, shared by dispatched runs
+    /// and watches so purple keeps meaning one thing only. Deliberately not an entry in
+    /// StatusStyles: the status IS `done`, and a configurable colour for a derived
+    /// presentation state would let the two drift.</summary>
+    private const string MachineWaitBorderColor = "#FF7FB8D8";
+
+    /// <summary>The colour of a forked card. Not in StatusStyles for the same reason as the one
+    /// above — the status underneath is whatever the last process to speak said it was — and
+    /// deliberately its own alarm red rather than the `error` red: an error is the session
+    /// reporting a problem, a fork is the deck reporting that the session is no longer one
+    /// thing. It outranks the machine-wait colour in <see cref="BorderBrush"/>, because the
+    /// wall is scanned by colour and this is the only state where the card's own words may be
+    /// describing half a conversation.</summary>
+    private const string ForkedBorderColor = "#FFE0544A";
+
+    private string ClosedLabel => "closed" + (_endReason is { Length: > 0 } r ? $" ({r})" : "");
 
     /// <summary>Status→style mapping resolver, injected once at startup from config.</summary>
     public static Func<SessionStatus, StatusStyle> ResolveStyle { get; set; } =
@@ -301,6 +1054,16 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
         get
         {
             if (_closed) return false;
+            // A session that dispatched headless runs ends its turn for real, so it goes
+            // `done` and blinks like a session waiting for an answer — the one thing it is
+            // not (a long-running management session looked like it wanted the user while
+            // four dispatched runs were building). The colour still says done, because that is
+            // true; only the blink is dropped, because the blink is the part that means
+            // "look at me". Deliberately `done` alone: `waiting` and `error` need the user
+            // whether or not a dispatched run is out, and silencing those would trade a false
+            // alarm for a missed one.
+            if (_status == SessionStatus.Done &&
+                (_dispatchedRuns > 0 || ActiveWatches > 0 || ActiveJobs > 0)) return false;
             var style = ResolveStyle(_status);
             if (style.AltColor == null) return false;
             return !style.UntilAcknowledge || !_acknowledged;
@@ -321,6 +1084,8 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
         get
         {
             if (_closed) return MakeBrush("#555555");
+            if (ForkedProcesses) return MakeBrush(ForkedBorderColor);
+            if (WaitingOnMachine) return MakeBrush(MachineWaitBorderColor);
             var style = ResolveStyle(_status);
             string color = BlinkActive && _altPhase ? style.AltColor ?? "black" : style.Color;
             return MakeBrush(color);
@@ -342,6 +1107,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
     {
         Raise(nameof(Status));
         Raise(nameof(StatusText));
+        Raise(nameof(StatusDisplay));
         Raise(nameof(BorderBrush));
         Raise(nameof(Closed));
         Raise(nameof(TooltipText));

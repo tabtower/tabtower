@@ -27,7 +27,7 @@ public sealed class AppBarService
     /// Pixels of work area the reservation must always leave on its monitor.
     /// A reservation that takes the monitor whole is accepted by the shell — no error, no
     /// rejection — and the shell's own work-area bookkeeping then spins forever: measured
-    /// 08-08-2026 (T-0364) on a 1080x1920 display, explorer.exe sat at 100-430% of a core on up
+    /// 08-08-2026 on a 1080x1920 display, explorer.exe sat at 100-430% of a core on up
     /// to 1,004,675 soft page faults per second for as long as the app ran, and went quiet
     /// within a second of it exiting. The cliff is at exactly zero — the identical test leaving
     /// one pixel over measured clean — so this only has to be non-zero.
@@ -130,7 +130,7 @@ public sealed class AppBarService
 
         // Re-announce the reservation only when it actually moved. Every ABM_SETPOS makes the
         // shell recompute and answer with ABN_POSCHANGED, which lands in WndProc and calls this
-        // method straight back — measured at 250 callbacks/sec (T-0364). This is a separate bug
+        // method straight back — measured at 250 callbacks/sec. This is a separate bug
         // from the zero-work-area storm and affects every zone mode.
         if (!_hasAppliedRect || !SameRect(_appliedRect, abd.rc))
         {
@@ -228,6 +228,19 @@ public sealed class AppBarService
         {
             SetPosition();
             handled = true;
+        }
+        else if (_mode != ZoneMode.Off && msg == NativeMethods.WM_DPICHANGED)
+        {
+            // Landing on a monitor whose DPI differs from the one the window was last on makes
+            // WPF re-apply the window's DIP size at the new scale, which on a 125% display
+            // inflates a correctly-placed zone by exactly a quarter (measured 10-08-2026:
+            // 1936x1029 asked for, 2418x1284 on screen, a 1920x1080 monitor overflowed on both
+            // axes). Snap back once WPF has finished, hence the dispatcher hop rather than a
+            // call from inside the message. The shell's ABN_POSCHANGED usually lands right
+            // behind it and does the same, but nothing guarantees that it does; SetPosition
+            // moves the window only when it is not already in place, so a second call is free.
+            _source?.Dispatcher.BeginInvoke(new Action(SetPosition),
+                System.Windows.Threading.DispatcherPriority.Loaded);
         }
         else if (_mode != ZoneMode.Off && msg == NativeMethods.WM_SYSCOMMAND)
         {

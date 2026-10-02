@@ -4,7 +4,7 @@ using System.Windows.Threading;
 namespace SessionDeck.Services;
 
 /// <summary>
-/// Live updates for the tasks file (T-0116): FileSystemWatcher on the containing folder,
+/// Live updates for the tasks file: FileSystemWatcher on the containing folder,
 /// filtered to the one file, with a 300ms debounce (editors/exporters fire several events
 /// per save). Loading runs off-thread (TasksFileService retries a locked file); the result
 /// is delivered on the UI dispatcher. Construct on the UI thread.

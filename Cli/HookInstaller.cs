@@ -28,7 +28,7 @@ public static class HookInstaller
         ("StopFailure", null),
         ("SessionEnd", null),
         ("PreToolUse", "AskUserQuestion|ExitPlanMode"),
-        ("PostToolUse", "AskUserQuestion|ExitPlanMode"),
+        ("PostToolUse", "AskUserQuestion|ExitPlanMode|Agent"),
         ("Elicitation", null),
         ("ElicitationResult", null),
     };
@@ -139,7 +139,14 @@ public static class HookInstaller
             root["hooks"] = hooks;
         }
 
-        string command = $"powershell -NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\"";
+        // -WindowStyle Hidden is not cosmetic: without it every hook that fires flashes a console
+        // window, and creating and destroying a window is shell work that explorer.exe pays for
+        // (measured at 103% of a core, with the taskbar dropping out, 2026-08-06).
+        // Must stay before -File: everything after -File belongs to the script.
+        // What it does NOT buy back: Claude Code honours the matcher, so the two entries below
+        // never run on an ordinary tool call. The bridge is a per-turn cost, not a per-call one.
+        // Measured rates and the sampling that proves it: hooks/README.md, "What the bridge costs".
+        string command = $"powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{scriptPath}\"";
 
         foreach (var (evt, matcher) in HookTable)
         {

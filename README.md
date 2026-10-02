@@ -2,7 +2,7 @@
 
 **A Windows control deck for your running Claude Code sessions.**
 
-SessionDeck tiles every VSCode window into a live grid and shows each Claude Code session inside it as a status card — grey when idle, blue while working, blinking orange when Claude is waiting for you, green when it's done. One click focuses the window, activates the right tab, and clears the alert.
+SessionDeck tiles every VSCode window into a live grid and shows each Claude Code session inside it as a status card — grey when idle, blue while working, blinking orange when Claude is waiting for you, purple when the turn is done, green when the session has been wrapped up for good, white when it handed off to a successor and closed itself. One click focuses the window, activates the right tab, and clears the alert.
 
 **Built for one setup, on purpose:** Claude Code running inside **VSCode** — through its [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code) — on **Windows 10/11**. A session is a VSCode tab here, and that assumption runs through the whole tool.
 
@@ -26,7 +26,7 @@ Click it, and the deck focuses the VSCode window, reveals that session's tab, an
 
 - **Live window grid** — real DWM thumbnails (`DwmRegisterThumbnail`), rendered by the Windows compositor. No screen capture, no code injection, near-zero CPU.
 - **Workspace cards** — one card per VSCode workspace, showing the project name and the current git branch. Workspaces are persistent: a card survives closing the window and re-binds automatically when a matching window reappears.
-- **Session cards** — one sub-card per Claude Code session, with a status-coloured border driven by Claude Code hooks (`idle` / `working` / `waiting` / `done` / `error`). The status → colour/blink mapping lives in config, not in code.
+- **Session cards** — one sub-card per Claude Code session, with a status-coloured border driven by Claude Code hooks (`idle` / `working` / `waiting` / `done` / `error`), plus two set from outside: `wrapped` for a session you have closed out yourself, and `replaced` for one that handed its work to a new session and was then killed — its dead tab is the only thing left, the deck has the connector close that tab for you, and the card is swept the moment the tab is gone. The status → colour/blink mapping lives in config, not in code.
 - **Click to resume** — clicking a session card focuses the VSCode window, activates that session's tab (via the companion extension), and acknowledges the blink. A closed session resumes with its full history.
 - **Windows notifications** — when the deck itself might be buried, a session that needs attention escalates to a native notification and a taskbar badge — and both withdraw the moment the cause is gone, including when you handle it outside the deck.
 - **Reserved Zone** — SessionDeck can claim a quarter, half, or any custom fraction up to 90% (e.g. `2/7`) of a monitor as an AppBar, so maximized windows and snap never cover it. While zoned, the window is locked in place until the zone is turned off. To hand the deck a *whole* monitor, leave the zone off, maximize it and turn 📌 on: a reservation that leaves its monitor no work area at all is accepted by Windows and then sends the shell into a spin, so the deck will not ask for one.
@@ -36,11 +36,39 @@ Click it, and the deck focuses the VSCode window, reveals that session's tab, an
 
 ### A tasks panel, if you want one
 
-Point SessionDeck at a JSON file and it grows a read-only tasks panel: a collapsed strip beside the deck, and a full page listing your tasks next to your live sessions. Click a task to open a session in its workspace — a new one, or a resume of a session already linked to it.
+Point SessionDeck at a JSON file and it grows a read-only tasks panel: a full page listing your tasks next to your live sessions, and optionally a collapsed strip of task squares beside the deck (⚙ → *Tasks strip on the deck*, off by default). Click a task to open a session in its workspace — a new one, or a resume of a session already linked to it. The toolbar's **Run task** box does the same from a task number, without finding the card first.
+
+If the file also describes the tree its tasks came from, the page draws a two-column grid of numbered squares down its right edge — the top level, and the selected item's children — so you can see where you are and jump anywhere in a click.
 
 ![The tasks page: tasks on the right, live sessions grouped by workspace on the left](assets/screenshots/tasks-page.png)
 
 SessionDeck only ever reads the file, and reloads within a second of any change. The producer owns the content, the ordering and the status colours — the panel is deliberately agnostic about where your tasks come from. The full contract is behind the dialog's **📋 Copy spec** button. Leave the path empty and the feature does not exist.
+
+### Session groups: which window a new session opens in
+
+One folder can be open in several VSCode instances at once - each with its own
+`--user-data-dir`, so each can run a separate Claude Code configuration. They share a single
+card, because a card is a folder, and until now a new session went to whichever of them you
+focused last: invisible, and it moves under you.
+
+A **session group** names one of those instances and gives it a modifier. Hold it as you click
+*+ New session* or a task, and the session opens in that instance every time. No modifier is a
+group too, so the plain click has a fixed home rather than a guess. In the **Run task** box the
+same choice is a word after the number (`4.0 green`); a group's `Aliases` add more words for it,
+in any language.
+
+Groups are config, under `SessionGroups` in `%APPDATA%\SessionDeck\config.json`: an id, the
+modifier, a marker that appears in that instance's window titles (a coloured square in
+`window.title` is ideal - one per instance, and nothing else carries it), the folder it applies
+to, and optionally the script that starts that instance, which lets the deck bring it up when it
+is not running. The deck runs that script rather than composing a `Code.exe` command line of its
+own, because what binds a window to its Claude Code configuration is an environment variable the
+launcher sets (`CLAUDE_SECURESTORAGE_CONFIG_DIR`), and a window started without it looks
+identical and uses the wrong one. A group's `ConfigDir` names that folder (its last path segment,
+e.g. `.claude-work`): the hook reports the folder name of every session it sees, and the deck uses
+it to place each running session in its instance. `sessiondeck groups` prints every group with its
+state. No groups are configured by default, and with none, or on a card no group names, nothing
+changes.
 
 ### Toolbar toggles
 
@@ -137,15 +165,18 @@ sessiondeck stage --monitor <n> --half left|right | --full | --rect x,y,w,h
 sessiondeck zone  --monitor <n> --half left|right | --quarter left|right | --custom left|right [--size 2/7|40%|0.4] | --off
 sessiondeck toggle list | get <id> | set <id> on|off
 sessiondeck tasks [--file <path> | --off]
+sessiondeck groups                       # the VSCode instances a new session can be aimed at
 sessiondeck status
+sessiondeck reconcile                    # close sessions whose tab or window is gone, now
 sessiondeck quit                         # close the running app cleanly
 sessiondeck install-hooks [--settings <path>] [--dry-run]   # register the Claude Code hooks
 sessiondeck uninstall-hooks              # remove them (both run locally, no app needed)
 
 sessiondeck session start  --id <session_id> --workspace <name> [--title "..."]
-sessiondeck session status --id <session_id> --state working|waiting|done|error|idle
+sessiondeck session status --id <session_id> --state working|waiting|done|wrapped|replaced|error|idle
 sessiondeck session open   --id <session_id>
 sessiondeck session end    --id <session_id>
+sessiondeck session new    <target> [--prompt "..."] [--group <id>] [--after <sid>] [--no-focus]
 sessiondeck session list   [--workspace <name>] [--all]
 ```
 
@@ -161,9 +192,10 @@ sessiondeck session list   [--workspace <name>] [--all]
 ## Documentation
 
 - [`CLAUDE.md`](CLAUDE.md) — how to build, test and release it, plus the settled design decisions.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — the code map: which file owns what, and what breaks when you change it.
 - [`hooks/README.md`](hooks/README.md) — hook wiring and the waiting-detection heuristics.
 - [`vscode-extension/README.md`](vscode-extension/README.md) — the companion extension.
 
 ## License
 
-[MIT](LICENSE) © BPM Ltd.
+[MIT](LICENSE). The copyright holder is named in the license file.

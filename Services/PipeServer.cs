@@ -17,6 +17,10 @@ public sealed class VscodeSyncMessage
     public int Pid { get; set; }
     public bool Focused { get; set; }                // VSCode window has OS focus
     public List<VscodeTab> Tabs { get; set; } = new();
+    /// <summary>The connector's own version (extension 0.6.12+). Absent from older
+    /// extensions, which is exactly what the deck needs to know: a command they do not
+    /// understand is silently dropped on their side, so the deck must not rely on it.</summary>
+    public string? Version { get; set; }
 }
 
 public sealed class VscodeTab
@@ -38,6 +42,69 @@ public sealed class VscodeConnection
 
     public string WorkspacePath { get; set; } = "";
     public int Pid { get; set; }
+
+    /// <summary>The extension version this window reported, "" for anything before 0.6.12,
+    /// which sent none. A window keeps the version it was loaded with until it reloads, so
+    /// after an upgrade the deck talks to a mix — and must check per connection what it may
+    /// ask for.</summary>
+    public string Version { get; set; } = "";
+
+    /// <summary>closeSession (v0.6.12): reveal the session's tab through Claude Code's own
+    /// id→panel registry and close it. An older extension logs "unknown command" and does
+    /// nothing, so the deck falls back to revealing the tab for the user to close by hand.</summary>
+    public bool SupportsCloseSession => VersionAtLeast(0, 6, 12);
+
+    /// <summary>openSession with Terminal (v0.6.15): resume through `claude --resume` in a
+    /// terminal instead of Claude Code's reveal-or-resume, which opens a BLANK tab for a session
+    /// whose window died (its id→panel registry is per-window) and does not throw, so the
+    /// catch-based fallback never fires. An older window ignores the flag and opens blank as
+    /// before, which is exactly what it did anyway.</summary>
+    public bool SupportsTerminalResume => VersionAtLeast(0, 6, 15);
+
+    /// <summary>closeSession with ById (v0.6.16): identify the tab through Claude Code's own
+    /// id→panel registry instead of by label, for a session that is still ALIVE. It is the only
+    /// way to close the tab of a session whose label is shared — six script-opened sessions are
+    /// six tabs called "Claude Code" — and it is refused to the `replaced` path, where the
+    /// session is dead and a reveal would resume it. An older window would drop the flag and
+    /// fall back to the label match, which is the case this exists to fix, so the deck asks
+    /// only a window that reported 0.6.16.</summary>
+    public bool SupportsCloseSessionById => VersionAtLeast(0, 6, 16);
+
+    private bool VersionAtLeast(int major, int minor, int patch)
+    {
+        var parts = Version.Split('.');
+        if (parts.Length < 3) return false;
+        if (!int.TryParse(parts[0], out int a) || !int.TryParse(parts[1], out int b) ||
+            !int.TryParse(parts[2], out int c)) return false;
+        return a != major ? a > major : b != minor ? b > minor : c >= patch;
+    }
+
+    /// <summary>This window's own Claude tabs, from its last sync. Held per connection
+    /// rather than merged straight onto the workspace: two VSCode windows can have the
+    /// same folder open (a second instance, a second profile), and each sync carries only
+    /// the sending window's tabs — so a shared list is overwritten by whichever window
+    /// synced last and the card ends up describing one window at a time (21-08-2026).</summary>
+    public List<VscodeTab> Tabs { get; set; } = new();
+
+    /// <summary>The window had OS focus at its last sync.</summary>
+    public bool Focused { get; set; }
+
+    /// <summary>When this window was last seen focused — the tie-break for which window a
+    /// command goes to when several share a folder.</summary>
+    public DateTime LastFocusedAt { get; set; }
+
+    /// <summary>The VSCode INSTANCE this connector belongs to (the extension host's parent,
+    /// which is that instance's Electron main process). Resolved once on connect; 0 when it
+    /// couldn't be read. It does NOT identify the window - every window of one instance
+    /// reports this same pid, see Hwnd below.</summary>
+    public int OwnerPid { get; set; }
+
+    /// <summary>The OS window this connector lives in, or IntPtr.Zero while it is still
+    /// unknown. Learned by focus correlation (MainWindow.CorrelateConnectorWindow), because
+    /// neither the pid nor the title can produce it: all windows of one VSCode instance
+    /// share one pid, two windows on one folder share one title, and a window with a custom
+    /// `window.title` matches no title pattern at all.</summary>
+    public IntPtr Hwnd { get; set; }
 
     internal VscodeConnection(StreamWriter writer) => _writer = writer;
 

@@ -1,15 +1,31 @@
+﻿using System.IO;
+
 namespace SessionDeck.Models;
 
 // Order matters: ZoneModeCombo items are mapped by index cast (persistence is by name).
 // There is deliberately no full-screen zone: reserving a whole monitor leaves it with no work
-// area, which pins explorer.exe at 100-430% of a core for as long as the app runs (T-0364).
+// area, which pins explorer.exe at 100-430% of a core for as long as the app runs.
 // A whole monitor for the deck is "zone off + maximize + 📌 pin" instead.
 public enum ZoneMode { Off, QuarterLeft, HalfLeft, HalfRight, QuarterRight, CustomLeft, CustomRight }
 // StageMode.Full is unrelated — it maximizes a VSCode window and touches no appbar.
 public enum StageMode { Full, HalfLeft, HalfRight, Rect }
 
+/// <summary>Order of the workspace cards on the deck (with the ⚡ filter
+/// off the whole deck comes back and A→Z alone is not a useful way through it). Live cards
+/// float to the top in every mode (decision 16); this decides the order below them.</summary>
+public enum DeckSort { Alphabetical, Recent, Frequency }
+
 public static class ModeNames
 {
+    /// <summary>
+    /// Does the deck hold a place of its own on screen, so a session going orange or green is
+    /// visible where the user already looks and needs no OS notification?
+    ///
+    /// Every zone gives the deck a fixed place; only a free-floating deck (Off) can end up
+    /// somewhere the user never sees, which is what the notification gate asks about.
+    /// </summary>
+    public static bool HasOwnPlace(ZoneMode m) => m is not ZoneMode.Off;
+
     public static string ToName(ZoneMode m) => m switch
     {
         ZoneMode.Off => "off",
@@ -31,12 +47,31 @@ public static class ModeNames
             "half-left" => ZoneMode.HalfLeft,
             "half-right" => ZoneMode.HalfRight,
             "quarter-right" => ZoneMode.QuarterRight,
-            "full" => ZoneMode.Off,   // migration: the full-screen zone was removed in T-0364
+            "full" => ZoneMode.Off,   // migration: the full-screen zone was removed
             "custom-left" => ZoneMode.CustomLeft,
             "custom-right" => ZoneMode.CustomRight,
             _ => (ZoneMode)(-1),
         };
         return (int)m >= 0;
+    }
+
+    public static string ToName(DeckSort s) => s switch
+    {
+        DeckSort.Recent => "recent",
+        DeckSort.Frequency => "frequency",
+        _ => "abc",
+    };
+
+    public static bool TryParseDeckSort(string s, out DeckSort sort)
+    {
+        sort = s switch
+        {
+            "abc" => DeckSort.Alphabetical,
+            "recent" => DeckSort.Recent,
+            "frequency" => DeckSort.Frequency,
+            _ => (DeckSort)(-1),
+        };
+        return (int)sort >= 0;
     }
 
     public static string ToName(StageMode m) => m switch
@@ -68,7 +103,7 @@ public static class ZoneSizeParser
 {
     /// <summary>Widest custom zone allowed, as a share of the monitor width. The cap exists so
     /// the reservation always leaves the monitor a real work area: a zone that takes the whole
-    /// width leaves none, which pins explorer.exe for as long as the app runs (T-0364). The
+    /// width leaves none, which pins explorer.exe for as long as the app runs. The
     /// cliff is at exactly zero free pixels, so the margin only has to be non-zero — 10% is a
     /// visible strip rather than a slice nobody can grab.</summary>
     public const double MaxFraction = 0.9;
@@ -131,6 +166,18 @@ public class WorkspaceConfig
     public string? CustomColor { get; set; }         // null = auto (Peacock / default)
     public bool Hidden { get; set; }
     public string? TranscriptDir { get; set; }       // learned from hooks (stage D)
+    /// <summary>Last time a session A PERSON opened reported anything on this card, or the
+    /// user opened the card from the deck — the key behind the "last used" order. Headless
+    /// runs and never-materialized ghosts are excluded, and were the whole reason the order
+    /// stopped matching what the user had done (MainWindow.TouchUsage). Persisted because the
+    /// sessions it was derived from are pruned by retention, so the deck would otherwise
+    /// forget that a card was busy last week the moment its 21st session closed.</summary>
+    public DateTime? LastUsedAt { get; set; }
+    /// <summary>How many sessions a person has ever opened on this card — the "most used"
+    /// order, same exclusions as above. Counting the sessions still on the card would top out
+    /// at the retention limit and rank every heavily-used workspace the same, which is why
+    /// this is a running total and not derived on the fly.</summary>
+    public int UseCount { get; set; }
     public List<SessionConfig> Sessions { get; set; } = new();
 }
 
@@ -150,16 +197,52 @@ public class SessionConfig
     public string? TranscriptPath { get; set; }
     public string? Source { get; set; }              // SessionStart source: startup|resume|clear|compact
     public string? PermissionMode { get; set; }
+    /// <summary>CLAUDE_CODE_ENTRYPOINT as the hook saw it: claude-vscode for a session in the
+    /// IDE, sdk-cli for a headless `claude --print` run. Persisted so a restart doesn't
+    /// un-hide every automated session until its next hook event.</summary>
+    public string? Entrypoint { get; set; }
+    /// <summary>The session is a `claude -p` run (hook-proven from its command line, not from
+    /// the inherited environment). Persisted for the same reason as Entrypoint: a restart must
+    /// not un-hide a batch of automated runs that is still going.</summary>
+    public bool PrintMode { get; set; }
+    /// <summary>The session that launched this one as a headless run (see
+    /// SessionViewModel.DispatchedBy). Persisted so a restart mid-run keeps the link, which
+    /// nothing else could rebuild — the launching process tree is gone by then.</summary>
+    public string? DispatchedBy { get; set; }
     public string? EndReason { get; set; }
     public DateTime? LastEventAt { get; set; }
     public string? AutoTitle { get; set; }           // derived from the transcript (stage D)
     public string? TabTitle { get; set; }            // VSCode tab label (last ai-title entry)
-    // Persisted so the orphan sweep's clock survives a restart: it used to be runtime only,
-    // so every launch of the deck gave a dead session another full TTL and a card on a
-    // workspace worked in daily could never age out (issue 2026-08-09).
-    public DateTime? OrphanSince { get; set; }
-    public string? Entrypoint { get; set; }          // claude-vscode|cli|sdk-cli (transcript)
-    public DateTime? LastMessageAtUtc { get; set; }  // last real conversation event
+    /// <summary>Background agents still out when the deck was last saved. Persisted because
+    /// they are the one reason a WORKING session's transcript goes quiet without the session
+    /// being over — without this a restart mid-run read the silence as death and dropped the
+    /// card to idle while five agents were still working.</summary>
+    public int BackgroundAgents { get; set; }
+    /// <summary>The two halves of the watch count, as they stood when the deck was last saved:
+    /// the background-task ids still running (from the Stop hook) and the ids the transcript
+    /// attributes to a Monitor call. Persisted for the same reason as BackgroundAgents above
+    /// and a sharper one - a session waiting on a monitor emits NOTHING until the monitor wakes
+    /// it, so there is no next hook event to refill the first half from. Without this the count
+    /// reset to zero on every restart and the card went back to blinking purple "your turn",
+    /// which is the exact fault this count exists to remove, reappearing on every
+    /// install. Both halves self-correct: the next Stop overwrites the live ids (it is sent
+    /// even when empty) and the next transcript scan overwrites the monitor ids.</summary>
+    public List<string> LiveTaskIds { get; set; } = new();
+    public List<string> MonitorTaskIds { get; set; } = new();
+    /// <summary>The other type half, for background jobs. Persisted for the same reason as the
+    /// monitor ids and refilled by the same scan.</summary>
+    public List<string> JobTaskIds { get; set; } = new();
+    /// <summary>Which VSCode instance this session was last SEEN running in — the id of the
+    /// <see cref="SessionGroupConfig"/> whose window held its tab. "" while unknown.
+    ///
+    /// Persisted because it is the only record of it. Nothing else in the deck or in Claude
+    /// Code knows which of several same-folder instances a session lives in: the hook payload
+    /// carries no instance and no window, and a tab list dies with its window. When one
+    /// instance went down with a stack of tabs on it, there was no way to establish WHICH
+    /// sessions had been lost, let alone put them back - and clicking their cards sent them to
+    /// another instance's window, which knows nothing about them and opened blank tabs.</summary>
+    public string GroupId { get; set; } = "";
+    public DateTime? LastMessageAtUtc { get; set; }  // last real conversation event (transcript)
 }
 
 /// <summary>Session status → border style. Lives in config so the mapping can change
@@ -170,6 +253,68 @@ public class StatusStyle
     public string? AltColor { get; set; }            // non-null = blinking
     public int BlinkIntervalMs { get; set; } = 500;
     public bool UntilAcknowledge { get; set; }       // blink stops (solid Color) after user click
+}
+
+/// <summary>One VSCode INSTANCE the deck can aim a new session at.
+///
+/// Several VSCode instances can hold the same folder open (for example three on
+/// <c>~/.claude</c>), each with its own <c>--user-data-dir</c> so each can run with its own
+/// Claude Code configuration. Without groups a new session goes to whichever of them was
+/// focused last, which is invisible and flips under the user; a group makes the choice
+/// explicit and repeatable: hold the group's modifier, get that instance.
+///
+/// A group is identified by a marker in its windows' titles, because nothing cheaper works.
+/// The pid of a window says which INSTANCE it belongs to and each of these IS its own
+/// instance, but a pid is not stable across a restart and there is nothing to write in a
+/// config file. The title is: set <c>window.title</c> per instance (e.g. with a coloured
+/// square), so every window of one instance carries the marker, and no window of another
+/// does.</summary>
+public class SessionGroupConfig
+{
+    /// <summary>What the CLI's <c>--group</c> takes and the log prints. Stable; the name is
+    /// free to change.</summary>
+    public string Id { get; set; } = "";
+    /// <summary>Shown in the status bar when a session opens there.</summary>
+    public string Name { get; set; } = "";
+    /// <summary>The modifier combination that asks for this group: "", "ctrl", "alt",
+    /// "shift", or any of them joined by "+". "" is the group a plain click goes to.</summary>
+    public string Modifier { get; set; } = "";
+    /// <summary>A substring of this instance's window titles. Must appear in NO other
+    /// instance's - a coloured square in each instance's `window.title` is exactly that.</summary>
+    public string TitleMarker { get; set; } = "";
+    /// <summary>The colour this instance is KNOWN BY, drawn on every session card that runs in
+    /// it. Instances marked by coloured squares are naturally called "the purple one", "the
+    /// green one" and so on, so the chip uses those words and those colours - a name the user
+    /// has to decode is worse than no chip. Empty = the chip is drawn in the ordinary card grey,
+    /// which is right for any group without a colour of its own.</summary>
+    public string Color { get; set; } = "";
+    /// <summary>Only groups whose path matches the target card apply; empty = every card.
+    /// Without it a plain click on an ordinary repo card would ask for the default group and
+    /// find nothing.</summary>
+    public string WorkspacePath { get; set; } = "";
+    /// <summary>The script that starts this instance, run when the group is asked for and its
+    /// window is not there. Empty = the deck never launches it and says so instead.
+    ///
+    /// It is a LAUNCHER and deliberately not a command line the deck assembles itself. Two
+    /// measured facts say so. The configuration is not the `--user-data-dir`: that only forces
+    /// a separate process, and what actually binds the window to its Claude Code configuration
+    /// is <c>CLAUDE_SECURESTORAGE_CONFIG_DIR</c> in its environment - a window started without
+    /// it looks right, title and all, and silently runs with the DEFAULT configuration. And the
+    /// start itself goes through <c>bin\code.cmd</c>, not <c>Code.exe</c>: six attempts to bring
+    /// a second instance up through <c>Code.exe</c> produced no window at all. The launcher
+    /// scripts already carry both facts, plus a stuck-updater recovery; duplicating any of it
+    /// here would be a second copy to keep in step, and the copy that is wrong is the one that
+    /// starts an instance with the wrong configuration.</summary>
+    public string Launcher { get; set; } = "";
+    /// <summary>The folder NAME of the CLAUDE_SECURESTORAGE_CONFIG_DIR this instance's launcher
+    /// sets (for example ".claude-work"). The hook reports that name for every session it
+    /// sees, and this is how the deck knows which window the session runs in. Empty = no
+    /// session is attributed to this group by the hook.</summary>
+    public string ConfigDir { get; set; } = "";
+    /// <summary>Words the Run box accepts after a task number to ask for this group, the same
+    /// way "fast" already asks for a task's fast variant. The id always works; these are for
+    /// the hand that is already in the box. Words in other languages belong here.</summary>
+    public List<string> Aliases { get; set; } = new();
 }
 
 /// <summary>A user-defined toolbar toggle (feature 2026-07-19). SessionDeck knows nothing
@@ -210,14 +355,47 @@ public class WindowBounds
 
     /// <summary>Window was maximized; X/Y/W/H hold the restore bounds. Persisted so that
     /// "zone off + maximize + 📌 pin" — the way to give the deck a whole monitor since the
-    /// full-screen zone was removed (T-0364) — survives a restart instead of being redone
+    /// full-screen zone was removed — survives a restart instead of being redone
     /// on every launch.</summary>
     public bool Maximized { get; set; }
 }
 
 public class AppConfig
 {
-    public int SchemaVersion { get; set; } = 2;
+    /// <summary>The chip colour a group is drawn in when its config carries none. Known only for
+    /// groups whose id is one of these colour names; anything else gets "" and stays card grey.
+    /// Lightened well past the emoji squares they stand for, because the chip is small text on
+    /// a dark card and a saturated purple is unreadable there.</summary>
+    public static string GroupColorFor(string id) => id.ToLowerInvariant() switch
+    {
+        "purple" => "#B99CF5",
+        "green"  => "#5FD48A",
+        "orange" => "#F0964B",
+        _        => "",
+    };
+
+    /// <summary>Schema 7: groups seeded before the chip existed learn their colour. Only fills
+    /// an EMPTY one, so a colour set by hand in config.json is never overwritten.</summary>
+    public static int FillMissingGroupColors(List<SessionGroupConfig> groups)
+    {
+        int filled = 0;
+        foreach (var g in groups)
+        {
+            if (g.Color.Length > 0) continue;
+            string c = GroupColorFor(g.Id);
+            if (c.Length == 0) continue;
+            g.Color = c;
+            filled++;
+        }
+        return filled;
+    }
+
+    public int SchemaVersion { get; set; } = 8;   // 3: `done` moved green→purple, `wrapped` took green
+                                                  // 4: usage stamps rebuilt — machine activity stopped counting as use
+                                                  // 5: retired, no longer changes anything
+                                                  // 6: retired, no longer changes anything
+                                                  // 7: session groups carry the colour their chip is drawn in
+                                                  // 8: retired, no longer changes anything
     public int NextTileId { get; set; } = 1;
     public List<TileConfig> Tiles { get; set; } = new();      // legacy, round-tripped only
     public int NextWorkspaceId { get; set; } = 1;
@@ -226,12 +404,56 @@ public class AppConfig
     public int ClosedSessionRetention { get; set; } = 20;     // per workspace (decision 12)
     public bool OpenSessionMaximized { get; set; } = true;    // stage D: collapse VSCode panels on session open
     public bool ShowHidden { get; set; }
+    /// <summary>Show only sessions that are running or asking for something, and drop the
+    /// workspace cards left with none (feature 2026-08-08). Expanding a card shows all of it
+    /// regardless, and a search switches the filter off for its duration.</summary>
+    public bool ActiveSessionsOnly { get; set; }
+    /// <summary>Show the sessions nobody opened by hand: scheduled tasks and runners firing
+    /// `claude --print`, which produce hooks indistinguishable from a real session and so
+    /// earn a card of their own. Default false — an existing config with
+    /// no such key deserializes to false, which is the wanted state, so no migration.</summary>
+    public bool ShowHeadlessSessions { get; set; }
+    /// <summary>Card order: "abc" (default — what the deck always did), "recent" or
+    /// "frequency". Default stays A→Z so an upgrade never silently rearranges the deck.</summary>
+    public string DeckSort { get; set; } = "abc";
+    /// <summary>Multiplier on the card font sizes, driven by A+ / A− on the toolbar
+    /// (feature 2026-08-07, widened to the whole deck 2026-08-08). 1.0 = the sizes the cards
+    /// were designed at; the view model clamps what is loaded, so an old or hand-edited config
+    /// cannot set an unusable size. The key keeps its original name so the size people already
+    /// chose survives the upgrade.</summary>
+    public double TaskFontScale { get; set; } = 1.0;
     public bool AlwaysOnTop { get; set; }                     // 📌 pin toggle (feature 2026-07-19)
     /// <summary>Master switch for the OS-level attention escalation (feature 2026-07-20):
     /// balloon + taskbar overlay badge + one-shot flash. Only ever fires when the deck is
     /// neither pinned nor zoned — see MainWindow.UpdateAttentionEscalation.</summary>
     public bool WindowsNotifications { get; set; } = true;
+    /// <summary>The narrow column of task squares at the right edge of the deck. Off by
+    /// default: since the tasks panel became one level at a time the strip
+    /// shows whichever level the page was last left on, which is rarely the one you want, and
+    /// the toolbar's toolbar button opens the page anyway. The ⚙ menu brings it back.</summary>
+    public bool ShowTasksStrip { get; set; }
+    /// <summary>Split view — the deck and the tasks page side by side.
+    /// Persisted, unlike the ordinary tasks page, because it is a way of USING the deck rather
+    /// than somewhere you go and come back from: a deck that opened flat every morning would
+    /// have to be re-split every morning.</summary>
+    public bool TasksSplitOpen { get; set; }
+    /// <summary>The deck's share of the split, 0.15 to 0.85. Saved so the ratio the user drags
+    /// is the one they get back; clamped on load, because a value outside that band is a half
+    /// that can no longer be grabbed with the mouse.</summary>
+    public double TasksSplitRatio { get; set; } = 0.5;
+    /// <summary>The live DWM preview of the bound VSCode window on every workspace card.
+    /// Off by default in this fork (it is rarely read, and it costs 170px on every card,
+    /// which is the deck's scarcest resource). Off, the band collapses to
+    /// nothing on a connected card and to the two-line "no window" hint on a disconnected one,
+    /// and the thumbnail is unregistered rather than merely hidden. The ⚙ menu brings it
+    /// back.</summary>
+    public bool ShowWindowPreviews { get; set; }
     public List<CustomToggleConfig> CustomToggles { get; set; } = new();
+    /// <summary>The VSCode instances a new session can be aimed at by modifier
+    /// (<see cref="SessionGroupConfig"/>). Empty = the deck routes as it always did, to the
+    /// window focused last. Never seeded: the list holds only what is written in
+    /// config.json.</summary>
+    public List<SessionGroupConfig> SessionGroups { get; set; } = new();
     /// <summary>
     /// How long each tool may sit without a result before the deck reads it as an open
     /// permission dialog (issue 2026-07-20). The VSCode extension fires no Notification
@@ -262,9 +484,15 @@ public class AppConfig
     /// sporadic bug survives an app restart; toggled via `sessiondeck log --debug`.</summary>
     public bool DebugLogging { get; set; }
 
-    /// <summary>External tasks file (T-0116). null/empty = the tasks feature is fully off:
+    /// <summary>External tasks file. null/empty = the tasks feature is fully off:
     /// no watcher, no read, no UI (strict opt-in).</summary>
     public string? TasksFilePath { get; set; }
+    /// <summary>Optional JSON file of per-card badges written by another tool; see
+    /// Services/BadgeReader.cs for the format. Empty = no badges.</summary>
+    public string BadgesFile { get; set; } = "";
+    /// <summary>Extra words the Run box accepts, after a task number, to ask for that task's
+    /// fast variant. "fast" always works; this is for other languages.</summary>
+    public List<string> FastWords { get; set; } = new();
 
     public ZoneConfig Zone { get; set; } = new();
     public StageConfig Stage { get; set; } = new();
@@ -278,7 +506,17 @@ public class AppConfig
         ["idle"] = new StatusStyle { Color = "gray" },
         ["working"] = new StatusStyle { Color = "blue" },
         ["waiting"] = new StatusStyle { Color = "orange", AltColor = "black", UntilAcknowledge = true },
-        ["done"] = new StatusStyle { Color = "green", AltColor = "black", UntilAcknowledge = true },
+        ["done"] = new StatusStyle { Color = "purple", AltColor = "black", UntilAcknowledge = true },
         ["error"] = new StatusStyle { Color = "red", AltColor = "black", UntilAcknowledge = true },
+        // The session ran its full end-of-session wrap-up routine. It ends the
+        // session for real, so it takes the green `done` used to carry, and `done` — which
+        // now only means "the turn stopped" — moves to purple.
+        ["wrapped"] = new StatusStyle { Color = "green", AltColor = "black", UntilAcknowledge = true },
+        // The session handed off to a successor and its process was killed (by a relay script
+        // that hands a session over to a successor). Nothing is running behind its tab; the only thing left to do is close that
+        // tab, so the card says so in a colour no live status uses, and does not blink — a
+        // dead session is not an alert. New key, no migration: a saved map without it falls
+        // back to this default on load and is written out with it on the next save.
+        ["replaced"] = new StatusStyle { Color = "white" },
     };
 }

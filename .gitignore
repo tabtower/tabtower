@@ -19,3 +19,8 @@ publish/
 # OS
 Thumbs.db
 desktop.ini
+
+# scratch patterns (start-feature)
+*.tmp
+*.scratch.md
+tests/scratch/

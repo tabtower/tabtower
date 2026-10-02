@@ -1,4 +1,4 @@
-# SessionDeck installer.
+﻿# SessionDeck installer.
 # Run from the extracted release zip. No admin rights required - everything is per-user.
 # Upgrading = re-running this same script over a newer zip; every step is idempotent.
 # PowerShell 5.1 compatible.
@@ -26,6 +26,16 @@ function Invoke-SessionDeck([string]$ExePath, [string]$Arguments) {
     } finally {
         Remove-Item $outFile, $errFile -ErrorAction SilentlyContinue
     }
+}
+
+# True when the destination already holds byte-identical content. Length first because it
+# settles almost every mismatch for free; the hash is what makes the check trustworthy, since
+# `dotnet publish` re-stamps the write time of every runtime assembly on every run while the
+# bytes stay identical - comparing timestamps would rewrite the entire ~150MB payload each time.
+function Test-SameContent([string]$Source, [string]$Destination) {
+    if (-not (Test-Path $Destination)) { return $false }
+    if ((Get-Item $Source).Length -ne (Get-Item $Destination).Length) { return $false }
+    return (Get-FileHash $Source -Algorithm SHA256).Hash -eq (Get-FileHash $Destination -Algorithm SHA256).Hash
 }
 
 if (-not (Test-Path (Join-Path $src 'SessionDeck.exe'))) {
@@ -58,9 +68,39 @@ if (Test-Path $InstallDir) {
 if ($resolvedSrc -ieq $resolvedDst) {
     Write-Host "Running from the install directory itself - skipping the copy step."
 } else {
+    # Write only what actually changed. An upgrade normally touches SessionDeck.dll and little
+    # else; rewriting all ~200 files unconditionally is what used to stall the machine for about
+    # a minute per install - explorer.exe at 200,000+ soft page faults per second, measured on
+    # eight installs. Files the source no longer carries are left in place on purpose: the .NET host
+    # loads by deps.json, so a leftover assembly is inert, and deleting by pattern here would be
+    # the one step in this script capable of destroying something it did not put there.
     Write-Host "Installing to $InstallDir ..."
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-    Copy-Item -Path (Join-Path $src '*') -Destination $InstallDir -Recurse -Force
+    $written = 0
+    $skipped = 0
+    $writtenBytes = 0
+    foreach ($file in Get-ChildItem -Path $resolvedSrc -Recurse -File) {
+        $relative = $file.FullName.Substring($resolvedSrc.Length + 1)
+        $target = Join-Path $resolvedDst $relative
+        if (Test-SameContent $file.FullName $target) { $skipped++; continue }
+        $targetDir = Split-Path $target -Parent
+        if (-not (Test-Path $targetDir)) { New-Item -ItemType Directory -Force -Path $targetDir | Out-Null }
+        # Retried, because "no SessionDeck is running" is not a state this machine reaches.
+        # Every Claude Code hook invokes SessionDeck.exe as a CLI client, so on a busy night a
+        # transient client process is almost always alive, and it loads the WPF assemblies just
+        # like the app does. On 11-09-2026 one such client grabbed WindowsBase.dll mid-copy: the
+        # script died there and left the install dir half on the new publish and half on the old,
+        # with the app shut down. A client lives a second or two, so a few spaced retries clear
+        # it; a genuinely held file still fails, loudly, at the end rather than mid-way.
+        $copied = $false
+        for ($try = 1; $try -le 8 -and -not $copied; $try++) {
+            try { Copy-Item -Path $file.FullName -Destination $target -Force -ErrorAction Stop; $copied = $true }
+            catch { if ($try -eq 8) { throw } ; Start-Sleep -Milliseconds 400 }
+        }
+        $written++
+        $writtenBytes += $file.Length
+    }
+    Write-Host ("  wrote {0} file(s), {1:N1} MB; {2} already up to date." -f $written, ($writtenBytes / 1MB), $skipped)
 }
 $exe = Join-Path $InstallDir 'SessionDeck.exe'
 
@@ -92,9 +132,20 @@ if (-not $vsix) {
     Write-Warning "VSCode 'code' command not found on PATH - skipping the extension. Install it later with: code --install-extension `"$($vsix.FullName)`""
 } else {
     Write-Host "Installing the VSCode extension ($($vsix.Name))..."
-    & code --install-extension $vsix.FullName --force 2>&1 | Out-Null
-    $listed = & code --list-extensions --show-versions 2>$null |
-        Where-Object { $_ -match 'sessiondeck-connector@(.+)$' } | Select-Object -First 1
+    # `code` writes Node's deprecation warnings to stderr. Under $ErrorActionPreference
+    # 'Stop' PowerShell 5.1 turns a redirected stderr line into a terminating
+    # NativeCommandError, so the installer died here - after copying the files, but
+    # before registering the hooks and starting the app (09-08-2026, Node DEP0169).
+    # The extension is explicitly a warning-not-failure step; keep it that way.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & code --install-extension $vsix.FullName --force 2>&1 | Out-Null
+        $listed = & code --list-extensions --show-versions 2>&1 |
+            Where-Object { $_ -match 'sessiondeck-connector@(.+)$' } | Select-Object -First 1
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
     if ($listed -match 'sessiondeck-connector@(.+)$') { $extVersion = $Matches[1] }
     if (-not $extVersion) { Write-Warning "Extension install did not verify - check 'code --list-extensions --show-versions'." }
 }

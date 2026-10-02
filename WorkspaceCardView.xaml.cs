@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -32,8 +32,14 @@ public partial class WorkspaceCardView : UserControl
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
-        Loaded += (_, _) => { LayoutUpdated += OnLayoutUpdated; RefreshThumbnail(); SyncExpandGlyph(); };
-        Unloaded += (_, _) => { LayoutUpdated -= OnLayoutUpdated; UnregisterThumbnail(); _scroll = null; };
+        Loaded += (_, _) => { LayoutUpdated += OnLayoutUpdated; Subscribe(Vm); RefreshThumbnail(); SyncExpandGlyph(); };
+        // Unsubscribing here is what keeps a discarded card collectable, and it is not
+        // housekeeping - it was a 200 MB/minute leak (08-09-2026). The view model outlives the
+        // view: RebuildCards clears the bound collection on every sort, WPF throws the container
+        // away WITHOUT resetting its DataContext, and a view still on the surviving view model's
+        // PropertyChanged list is rooted by it - the whole visual tree, and its DWM thumbnail
+        // registration with it. Some 300 cards were re-created and kept on every sort.
+        Unloaded += (_, _) => { LayoutUpdated -= OnLayoutUpdated; Subscribe(null); UnregisterThumbnail(); _scroll = null; };
         // Collapsing the card (search filter / hide) doesn't unload it — without this the
         // DWM thumbnail keeps compositing at its old rect over the deck (bug 2026-07-19).
         IsVisibleChanged += (_, _) => RefreshThumbnail();
@@ -41,11 +47,19 @@ public partial class WorkspaceCardView : UserControl
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        if (_vm != null) _vm.PropertyChanged -= OnVmChanged;
-        _vm = Vm;
-        if (_vm != null) _vm.PropertyChanged += OnVmChanged;
+        Subscribe(Vm);
         RefreshThumbnail();
         SyncExpandGlyph();
+    }
+
+    /// <summary>Point this view's one subscription at <paramref name="target"/> (null to detach).
+    /// Idempotent, so the Loaded handler can re-attach after an unload without doubling up.</summary>
+    private void Subscribe(WorkspaceViewModel? target)
+    {
+        if (ReferenceEquals(_vm, target)) return;
+        if (_vm != null) _vm.PropertyChanged -= OnVmChanged;
+        _vm = target;
+        if (_vm != null) _vm.PropertyChanged += OnVmChanged;
     }
 
     private void OnVmChanged(object? sender, PropertyChangedEventArgs e)
@@ -63,7 +77,10 @@ public partial class WorkspaceCardView : UserControl
     private void RefreshThumbnail()
     {
         var vm = Vm;
-        if (!IsLoaded || !IsVisible || vm == null || vm.State != BindState.Connected ||
+        // ThumbArea hidden = the ⚙ "Window preview on cards" switch is off. DWM composites
+        // over the whole window surface and ignores WPF visibility, so the thumbnail has to be
+        // unregistered, not merely left behind a collapsed border.
+        if (!IsLoaded || !IsVisible || !ThumbArea.IsVisible || vm == null || vm.State != BindState.Connected ||
             vm.Hwnd == IntPtr.Zero || !NativeMethods.IsWindow(vm.Hwnd))
         {
             UnregisterThumbnail();
@@ -207,36 +224,44 @@ public partial class WorkspaceCardView : UserControl
 
     // ---- interactions ----
 
+    // Every handler below acts on `Vm.Owner`, not on `Vm`. On an ordinary card the two ARE the
+    // same object; on a group card (one per session group of a split card) `Vm` is a presentation mirror and
+    // the parent is what the engine knows about, so anything that focuses, edits, hides, removes
+    // or routes a session has to reach past the card that was clicked. `Vm` itself is still right
+    // for a card's OWN state — Expanded and TasksExpanded below.
     private void Card_MouseUp(object sender, MouseButtonEventArgs e)
     {
         if (e.OriginalSource is DependencyObject d && FindAncestorButton(d) != null) return;
-        if (Vm != null) Owner?.FocusWorkspace(Vm);
+        if (Vm != null) Owner?.FocusWorkspace(Vm.Owner);
     }
 
     private void Session_MouseUp(object sender, MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: SessionViewModel session } && Vm != null)
         {
-            Owner?.HandleSessionClick(Vm, session);
+            Owner?.HandleSessionClick(Vm.Owner, session);
             e.Handled = true;
         }
     }
 
     private void Edit_Click(object sender, RoutedEventArgs e)
     {
-        if (Vm != null) Owner?.EditWorkspace(Vm);
+        if (Vm != null) Owner?.EditWorkspace(Vm.Owner);
     }
 
     private void Pin_Click(object sender, RoutedEventArgs e)
     {
-        if (Vm != null) Owner?.PinWorkspace(Vm);
+        if (Vm != null) Owner?.PinWorkspace(Vm.Owner);
     }
 
     private void Expand_Click(object sender, RoutedEventArgs e)
     {
         if (Vm is not { } vm) return;
         vm.Expanded = !vm.Expanded;
-        if (vm.Expanded) Owner?.DiscoverHistoricalSessions(vm);
+        // Expanded is the CARD's own state, but the sessions are discovered into the parent
+        // and then re-partitioned; ones the transcript folder yields with no window stamp land
+        // on the default group's card.
+        if (vm.Expanded) Owner?.DiscoverHistoricalSessions(vm.Owner);
     }
 
     private void Tasks_Click(object sender, RoutedEventArgs e)
@@ -253,22 +278,29 @@ public partial class WorkspaceCardView : UserControl
 
     private void Hide_Click(object sender, RoutedEventArgs e)
     {
-        if (Vm != null) Owner?.ToggleHideWorkspace(Vm);
+        if (Vm != null) Owner?.ToggleHideWorkspace(Vm.Owner);
     }
 
+    /// <summary>The modifier held here picks the VSCode instance on a card that has session
+    /// groups (one VSCode instance per configured config dir) and means nothing on any other card.</summary>
     private void NewSession_Click(object sender, RoutedEventArgs e)
     {
-        if (Vm != null) Owner?.NewSessionInVscode(Vm);
+        if (Vm == null || Owner == null) return;
+        // A group card IS the choice of instance, so it needs no modifier: the card the user
+        // clicked already says which window they want, and the modifier stays for the unsplit cards.
+        var group = Vm.IsGroupCard ? Owner.GroupById(Vm.GroupId)
+                                   : Owner.GroupForModifiers(Vm.Owner);
+        Owner.NewSessionInVscode(Vm.Owner, null, group);
     }
 
     private void CloseWindow_Click(object sender, RoutedEventArgs e)
     {
-        if (Vm != null) Owner?.CloseWorkspaceWindow(Vm);
+        if (Vm != null) Owner?.CloseWorkspaceWindow(Vm.Owner);
     }
 
     private void Remove_Click(object sender, RoutedEventArgs e)
     {
-        if (Vm != null) Owner?.RemoveWorkspace(Vm);
+        if (Vm != null) Owner?.RemoveWorkspace(Vm.Owner);
     }
 
     /// <summary>The ⋯ actions menu (feedback 2026-07-19): sync dynamic items, then open.</summary>

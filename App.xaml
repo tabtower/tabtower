@@ -8,6 +8,7 @@
         <!-- Hebrew-first text renders RTL and right-aligned; anything else stays LTR.
              App-level so every window and dialog shares the one converter instance. -->
         <services:FlowDirectionConverter x:Key="Rtl"/>
+        <services:FontScaleConverter x:Key="FontScale"/>
 
         <!-- Standing rule (feedback 2026-07-20): ANY text that may start with Hebrew must
              be direction-aware. Tooltips are the easy thing to forget — they're written
@@ -17,7 +18,7 @@
                     Value="{Binding Content, RelativeSource={RelativeSource Self}, Converter={StaticResource Rtl}}"/>
         </Style>
 
-        <!-- Menu items likewise: headers are Hebrew throughout. -->
+        <!-- Menu items likewise: a header may be right-to-left text. -->
         <Style TargetType="MenuItem">
             <Setter Property="FlowDirection"
                     Value="{Binding Header, RelativeSource={RelativeSource Self}, Converter={StaticResource Rtl}}"/>

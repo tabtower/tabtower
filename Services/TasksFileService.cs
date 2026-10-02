@@ -7,7 +7,7 @@ namespace SessionDeck.Services;
 /// <summary>Outcome of loading the tasks file. Exactly one of Document/FileError is set;
 /// RecordWarnings lists tasks that were skipped (missing id/name) while the rest loaded.
 /// Errors are SHOWN, not swallowed — a stale list masquerading as fresh is worse than a
-/// visible error state (T-0116 decision).</summary>
+/// visible error state.</summary>
 public sealed record TasksLoadResult(TasksDocument? Document, string? FileError, IReadOnlyList<string> RecordWarnings)
 {
     public static TasksLoadResult Error(string message) => new(null, message, Array.Empty<string>());

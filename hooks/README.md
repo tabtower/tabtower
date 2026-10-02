@@ -8,23 +8,344 @@
 | `UserPromptSubmit` | `session status --state working` | steady blue | the **prompt** itself (`--detail`, trimmed to 400 chars) |
 | `Notification` | `session status --state waiting` | blinking orange | the waiting message (`--detail` — e.g. "needs your permission to use Bash") |
 | `PermissionRequest` | `session status --state waiting --permission-dialog` | blinking orange | the tool and its argument (`--detail` — e.g. `Write: C:\Windows\Temp\x.txt`) |
-| `Stop` | `session status --state done` | blinking green → steady once clicked | |
+| `Stop` | `session status --state done` | blinking purple → steady once clicked | `--agents` — how many subagents the payload's `background_tasks` still lists as running (see below); a non-zero count lands on `working` instead. `--tasks` — the ids of the `shell` entries in that same list, forwarded raw and counted as nothing here (see below) |
 | `StopFailure` | `session status --state error` | red | the error message that killed the turn |
 | `PreToolUse` (AskUserQuestion / ExitPlanMode) | `session status --state waiting` | blinking orange | the question text / "Waiting for plan approval" — question forms are not permission requests, so they never raise `PermissionRequest` |
 | `PostToolUse` (same tools) | `session status --state working` | steady blue | the user answered — Claude is working again |
+| `PostToolUse` (`Agent`) | `session agents --launched` | unchanged — the count only | one background subagent was just dispatched: +1 to the 🤖 chip, so it appears with the agents instead of at the end of the turn (see below) |
 | `Elicitation` | `session status --state waiting` | blinking orange | an input request from an MCP server — a real block that produces no `tool_use`, so the scanner is blind to it |
 | `ElicitationResult` | `session status --state working` | steady blue | the user answered the MCP server |
 | `SessionEnd` | `session end` | the card closes | `reason` (clear/logout/prompt_input_exit/other) |
 
-Every event also forwards, when present: `transcript_path` and `permission_mode`.
+Every event also forwards, when present: `transcript_path`, `permission_mode`,
+`--entrypoint` (see below), and `--pid` (see next section).
+
+### Which PROCESS is speaking (v0.9.99)
+
+Every event carries `--pid <n>`, taken from `$env:CLAUDE_PID` — the CLI's own process id. One
+session id is meant to name exactly one process. When it names two, both append to the same
+transcript and the conversation forks in silence: measured 12-09-2026 on a session that
+answered the user from two parallel branches of one file twenty minutes apart. Nothing else in
+the payload can see it, because the session id is identical on both sides by definition and the
+transcript is the victim rather than the witness.
+
+`CLAUDE_PID` is **constant across every event of a session, subagent events included** — probed
+the same night with a scratch `--settings` and `claude -p` over `SessionStart`, `PreToolUse`,
+`SubagentStart`, `SubagentStop` and `Stop` with a background agent out, one pid throughout. So a
+second pid is never a subagent and always a second process. The hook only reports it; the deck
+decides what it means (`SessionViewModel.NoteHookPid`, which fires on ALTERNATION between two
+pids and never on a pid merely changing, since a resume changes it legitimately).
+
+### Which VSCode window the session is in (v0.9.67)
+
+`SessionStart`, `UserPromptSubmit` and `Stop` also send `--config-dir <name>` when the session
+is running in an instance that uses a separate Claude Code configuration. Those three events are
+exactly the ones that can CREATE a session record in the deck, which is the same reason
+`--workspace` rides on them.
+
+**It comes from the environment, not from a payload field.** Claude Code reports no
+configuration and no window. `CLAUDE_SECURESTORAGE_CONFIG_DIR` is what binds a window to one
+Claude Code configuration, so it is set by exactly one instance's launcher script and is
+inherited by every session started in that window. The bridge sends the folder's NAME only (the
+last path segment, for example `.claude-work`) and never opens a file inside it, which is where
+the credentials are. **Its absence is a value**: the default instance, no group, no flag sent.
+
+**The hook knows no setup; the deck does the mapping.** A session group in
+`%APPDATA%\SessionDeck\config.json` claims a folder name through its `ConfigDir`
+(`SessionGroups[].ConfigDir`, compared case-insensitively), and a session reporting that name is
+stamped with that group. A name no group claims stamps nothing. No groups are seeded by default,
+so out of the box the flag is sent and ignored. `--group <id>` is still accepted on the same
+commands, for a script that already knows the group id.
+
+**Why the deck cannot work this out for itself.** Several instances have the same folder open, so
+a session can only be placed by matching its tab's label, and labels collide. Measured
+05-09-2026: two live sessions in two different instances carried the same title, and the
+correlation put one of them in the other's window. A stamp from this flag is therefore a lock
+the label matcher may not overwrite; the deck log says `from=hook` or `from=tab`.
+
+### Telling a headless session apart (v0.9.41)
+
+A scheduled task or a runner firing `claude --print` produces hooks that are
+**indistinguishable** from a session opened in the IDE, so each one earns a card of its own.
+On one machine that meant cards for a scheduled agent's own folder (four timers, one every two minutes),
+`system32` (scheduled tasks that never set a working directory, so Windows hands them
+`C:\WINDOWS\system32`), and a long tail of `scratchpad` / `tool-results` / `memory` folders
+that some background run happened to stand in.
+
+The discriminator is `CLAUDE_CODE_ENTRYPOINT`: `claude-vscode` for a session in the IDE,
+`sdk-cli` for a headless run. It is **not in the hook payload** — measured 14-08-2026 by
+dumping the raw stdin of `SessionStart`, `UserPromptSubmit`, `Stop` and `SessionEnd`, none of
+which carry it — so the bridge reads it off its own environment, which Claude Code sets on the
+process it spawns, and sends it as `--entrypoint` on every event rather than only on
+`SessionStart`, so a session that predates this version is classified on its next event.
+
+Two things worth knowing before touching this:
+
+- **The variable is inherited, and that hole is NOT harmless (fixed in v0.9.45).** A
+  `claude --print` launched from *inside* an IDE session — or through a hidden `wscript` /
+  `powershell` launcher that a session started — reports `claude-vscode` and reads as
+  interactive. Measured 18-08-2026: four dispatched `claude -p` runs sat on a card as four
+  sessions the user could click, resume and be blinked at, none of which the user opened. An
+  earlier version of this file called that right in spirit, since the run belongs to a session
+  the user opened; the card is the wrong place to say so, because a session row offers to
+  *resume* something nobody can talk to.
+  `--print-mode` now closes it from the other side (see below). A run from Task Scheduler with
+  a clean environment still reports `sdk-cli` and needs none of this.
+- **`SessionViewModel.IsHeadless` is a blacklist of the `sdk*` entrypoints, deliberately, not
+  a whitelist of the interactive ones.** An unknown entrypoint treated as interactive shows a
+  card the user may not want, which is only today's behaviour; treated as headless it would
+  silently swallow a session the user is waiting on. Precision over coverage.
+
+**`--print-mode`: the process, not the environment (v0.9.45).** The only thing that cannot be
+inherited is the claude process's own command line. A spawned run reads
+`claude  -p --dangerously-skip-permissions`; a session opened in the IDE reads
+`...\extensions\anthropic.claude-code-<v>\resources\native-binary\claude.exe --output-format
+stream-json ...`. Reading it costs ~1.2s through CIM — three times the whole bridge's budget for
+one event — so the hook asks in two stages, at `SessionStart` only:
+
+1. **Cheap (10ms), on every session:** `(Get-Process -Id $env:CLAUDE_PID).Path`. A session opened
+   in the IDE always runs the extension's own binary. If the path agrees with the environment,
+   the answer is no and nothing more is read.
+2. **Expensive (~1.2s), only on the contradiction:** the entrypoint claims the IDE while the
+   binary is a standalone CLI. Only then is the command line read, and only that one session pays
+   for it — a session the user really opened never reaches this call.
+
+Nothing is hidden on the cheap signal alone: a machine whose IDE binary lives somewhere
+unexpected would otherwise have its real sessions swallowed, which is the failure direction this
+file keeps refusing. The result is persisted (`PrintMode` in the config) because a process cannot
+stop being a print run and a restart must not un-hide a headless run that is still going, and it is ORed
+into `IsHeadless`, so the existing filter and its setting do the rest.
+
+The question is asked on `SessionStart`, `UserPromptSubmit` and `Stop` — the three events that can
+CREATE a session record. Not only the first, because a session whose `SessionStart` the deck
+missed (it was closed, restarting, or being upgraded mid-run) is recreated from whichever event
+arrives next, and a recreated print run that was never asked comes back as a session the user
+appears to have opened. Upgrading the deck while dispatched runs were in flight is exactly how that was
+found, an hour after the fix went in (18-08-2026): two runs from before the install were still
+sitting on a card.
+
+The setting is **Settings ⚙ → "Show headless sessions"**, off by default (`ShowHeadlessSessions`
+in the config). When off, the sessions are hidden and a card left with none of its own stops
+counting as open, so it drops off the deck under "Open only" instead of lingering empty. A
+search overrides the filter, for the same reason "Open only" stands down while searching.
 
 Of the **31** hook events Claude Code exposes (the authoritative list is the JSON schema of `settings.json` itself), SessionDeck registers these 11. The rest are irrelevant to session state: they either don't change it (`InstructionsLoaded`, `MessageDisplay`, `FileChanged`, `ConfigChange`), are already covered indirectly (`PreCompact`/`PostCompact` — `SessionStart` arrives with `source: compact`), or belong to flows not used here (`WorktreeCreate`, `TeammateIdle`, `TaskCreated`).
+
+### What the bridge costs, measured
+
+A claim that keeps being repeated, including once in this repo's own code comments, is that
+every tool call pays for two PowerShell starts (`PreToolUse` and `PostToolUse`). It is wrong.
+Claude Code honours the matcher, so those two registrations run **only** for `AskUserQuestion`
+and `ExitPlanMode`. Sampling every `powershell.exe` start on a busy machine for 65 seconds
+caught 55 of them across a dozen tool calls, and not one was `sessiondeck-hook.ps1`; the four
+to five processes per call all belonged to that machine's own unrelated guard hooks.
+
+What one invocation costs (Windows PowerShell 5.1, warm, median of 11 runs, 2026-08-06):
+
+| Step | Wall | CPU |
+|---|---:|---:|
+| `powershell.exe -NoProfile -Command exit`, the floor | 135ms | 188ms |
+| the script up to the exe call (process start, then parse stdin) | 208ms | 240ms |
+| `SessionDeck.exe session status ...` alone, pipe round trip included | 154ms | 67ms |
+| **the whole bridge, one event, end to end** | **422ms** | **~310ms** |
+
+The exe on its own is already over the sub-100ms target in `CliClient`, and PowerShell roughly
+doubles it. What keeps that from mattering is how rarely it happens. Over 3 days on one machine,
+136 sessions and 15,489 tool calls:
+
+| Event | Invocations |
+|---|---:|
+| `UserPromptSubmit` | 1,126 |
+| `Stop` | 786 |
+| `SessionStart` + `SessionEnd` | ~272 |
+| `PermissionRequest` | 3 |
+| `PreToolUse` + `PostToolUse` (matched) | 2 |
+
+About 2,200 invocations in 72 hours: **0.5 per minute for the whole machine**, near 0.3% of one
+core. Replacing PowerShell with a `sessiondeck hook <Event>` subcommand that reads the payload
+itself would save roughly 250ms per event, which is a quarter of a second per prompt and per
+turn end, in exchange for a new subcommand and a JSON parser in the exe. Measured that way it
+does not pay, which is why the bridge still looks like this. If the registered set ever grows to
+something that fires per tool call, this arithmetic changes and the subcommand becomes the
+obvious move.
+
+`Agent` joined the `PostToolUse` matcher in v0.9.44, which adds exactly one invocation per
+dispatched subagent — the cheapest possible leading edge, and still nowhere near per-tool-call.
+
+### Background subagents — the one thing neither the hooks nor the scanner used to see
+
+A session that dispatches subagents with `run_in_background` ends its turn and then sits
+there: the agents run, report back on their own and resume it. Until v0.9.38 the deck read
+that as the user's turn, because the `Stop` hook is genuine — the turn really did end. Every
+returning agent produced another `done`, so a batch of them blinked "your turn" repeatedly at
+a user with nothing to answer.
+
+**The transcript cannot help here.** A background `Agent` call returns in about 3ms with
+`{"status": "async_launched", "agentId": ...}`, so the transcript holds a completed tool call
+with its `tool_result` in place; the scanner has nothing pending to look at. (A *foreground*
+agent does leave a pending call, which is why `Agent` appears in the threshold table below —
+excluded from ageing, but visible.)
+
+**What does carry it is the `Stop` payload itself**, which the deck was already receiving and
+throwing away (measured 2026-08-14 against Claude Code 2.1.232):
+
+```json
+"background_tasks": [
+  {"id": "a70134...", "type": "subagent", "status": "running",
+   "description": "Delayed sleep test agent", "agent_type": "general-purpose"}
+]
+```
+
+The hook counts the `subagent` entries and passes `--agents <n>` on every `Stop`, zero
+included, so the next turn clears it. `SetSessionStatus` turns a `done` with `n > 0` into
+`working`, and the card shows a 🤖 chip so the blue is explained rather than mysterious.
+
+**The snapshot is late, though, and that reads as broken (v0.9.44).** It arrives only when the
+turn ENDS. A session that dispatches several agents, says so in the chat and then keeps working shows an
+empty card for the whole turn — reported 18-08-2026 as "it says it sent agents and the card shows
+nothing", and the log of that session says exactly why: three agents launched at 09:17:21, the
+chip appeared at 09:18:47 with the turn's `Stop`, and cleared at 09:22:46 when they were done. So
+`PostToolUse` on `Agent` now supplies the leading edge, one invocation per dispatched agent:
+
+- **Only an async launch counts.** `tool_response.status == "async_launched"` (with `isAsync`,
+  `agentId` and the description beside it) is the discriminator. A *foreground* agent's
+  `PostToolUse` fires when the agent has finished, and counting one would add an agent that no
+  longer exists.
+- **It is a tally, and tallies drift — this one is bounded.** It can only overcount, only until
+  the turn ends, and the `Stop` snapshot then overwrites it with the truth. An agent finishing
+  wakes the session, and that wake ends in exactly such a `Stop`.
+- **Status is deliberately untouched**, which is why this is its own CLI verb rather than a
+  `session status --state working`: the event fires mid-turn, and pushing a state from there would
+  clear `wrapped` and the lost-agents mark off an ordinary tool call.
+- **`background_tasks` is on `Stop` and `SubagentStop` only** — measured 18-08-2026 against Claude
+  Code 2.1.233. Not on `PostToolUse`, `UserPromptSubmit`, `SubagentStart` or `Notification`, so
+  the leading edge cannot be a snapshot and there is nothing cheaper to read.
+
+Three things learned the hard way, all worth keeping:
+
+- **Count the snapshot, never a start/stop tally.** `SubagentStart` and `SubagentStop` do
+  exist, both carrying `agent_id`, `agent_type` and the parent's `session_id` — but they are
+  not a matched pair. One background agent produced **four** Start/Stop pairs in a controlled
+  run: it stops and resumes every time it waits on something of its own. A running tally
+  would drift; `background_tasks` is a snapshot of the live registry and cannot.
+- **Only `subagent` counts as an agent — but a `shell` is not automatically inert** (corrected
+  11-09-2026; the older wording here said shells "never wake the session" and that is false).
+  The same list holds `type: "shell"` entries, and an armed **Monitor is one of them**: measured
+  against a Monitor and a backgrounded `sleep 300` in the same turn, the two came back as the
+  same record shape — `type: "shell"`, `status: "running"` — separated by nothing but the
+  free-text `description`. One of them wakes the session on every event it sees; the other can
+  sit there all day. So counting all of them as agents would still pin a card blue forever, and
+  that half of the old warning stands.
+- **What the shells are used for instead (v0.9.82).** Their ids ride along on `--tasks` and are
+  counted as nothing on their own. The deck intersects them with the ids the TRANSCRIPT
+  attributes to a `Monitor` call — the Monitor's `tool_result` announces its task id, a
+  backgrounded `Bash` announces its own differently — and only that intersection suppresses the
+  card's "your turn". Neither source can answer alone: the hook knows what is still alive but
+  not what it is, the transcript knows what it is but never records when a watch ended. An id
+  the transcript cannot attribute counts for nothing, so an unrecognised shell leaves the card
+  behaving exactly as it did before this existed.
+- **`--tasks` always carries a trailing comma, and that is not cosmetic (v0.9.85).** PowerShell's
+  native-command splatting DROPS an empty argument, so on the ordinary `Stop` — no background
+  shells at all — `--tasks` reached the exe with no value and consumed the next option as its
+  own: measured 11-09-2026, saved session records held `LiveTaskIds = ["--workspace"]`, and every
+  one of those turns also lost the `cwd` self-heal that option exists to carry. A lone comma
+  survives the call and splits to zero ids, which is what the empty list was always meant to be.
+- **No new hook registration, and no new cost.** Everything above rides on the `Stop` hook
+  that was already registered. `SubagentStart` / `SubagentStop` would each add a PowerShell
+  start *per agent*, which on a batch of ten is ten of them, for information the snapshot
+  already delivers.
+
+Not covered, deliberately: after a deck restart the count is 0 until that session's next
+`Stop` (it isn't persisted — a stale count from before a crash would pin a card blue). A
+`SessionStart` with `source` `startup` or `clear` resets it; `resume` and `compact` keep it,
+because the same conversation is continuing (see the next section — this is the fix for a card
+that dropped to idle the moment you clicked it).
+
+### Dispatched headless runs: the other thing a session can have in the air (v0.9.47)
+
+A subagent shares its parent's `session_id`, so it never becomes a card of its own and the 🤖
+chip covers it. A **dispatched run** is the opposite: one of a batch of `claude -p` runs, each a
+real session with its own id, launched by one session on its own behalf. They are hidden (see `--print-mode` above),
+but hiding them alone loses the fact the user actually wants — that this session has four runs out
+there working for it.
+
+Attribution cannot be derived, only stamped. Measured 18-08-2026 on a live batch:
+
+- **The process tree does not contain the launcher.** The batch is fired through a hidden
+  `wscript.exe` launcher (a `.vbs` that starts a PowerShell runner script) so no window ever
+  appears, and the shell that started it has exited by the time anything inspects the chain. Walking a child's ancestry
+  reaches `claude -p ← cmd ← powershell ← cmd ← wscript` and stops: the launching session is not
+  there.
+- **The environment does not either.** `CLAUDE_CODE_SESSION_ID` reaches the child through
+  inheritance, but Claude Code overwrites it with the child's own id before any hook runs.
+
+So a launcher that wants its runs attributed copies the `CLAUDE_CODE_SESSION_ID` it inherited
+into `SESSIONDECK_DISPATCHER` before it launches anything, every child inherits that, and the hook
+forwards it as `--dispatcher` on every event. The deck stores it (`DispatchedBy`, persisted: a
+restart mid-batch could never rebuild it) and **recounts** per launcher on every session event rather than keeping a tally, so a
+run that ends, is closed by hand or is swept as an orphan leaves the count on its own.
+
+**What counts is `working`, not "not closed"** — the difference between a number that empties
+itself and one that only grows. A `claude -p` run has exactly one turn, so `done` already means
+finished whether or not its `SessionEnd` ever arrived; of the two test runs launched while
+building this, one closed cleanly and the other was left sitting at `done` with no `SessionEnd`
+at all, which a "not closed" rule would have pinned on the launcher's card forever. A run woken by
+its own background agent is turned back to `working` by the `Stop` hook, so a busy one is never
+missed.
+
+Two deliberate asymmetries with the agent count:
+
+- **Dispatched runs do not hold the turn.** `background_tasks > 0` turns a `done` into `working`
+  because a subagent wakes its session when it reports back. A dispatched run reports through
+  whatever channel its launcher arranged (a file, a task list) and never wakes the session; the
+  session's turn really has ended, and the card must keep saying so.
+- **Both share one chip.** From the deck's side it is the same question — is anything of mine
+  still running — so the count is the sum and the tooltip names each half.
+
+A run fired from a terminal or a scheduled task carries no stamp, stays hidden, and is counted on
+nobody's card, which is correct: no session is waiting on it.
+
+### Agents that died with their session — the transcript is the only witness (v0.9.40)
+
+When a session's process exits while background subagents are still running, the next
+incarnation is told so, and nothing else is:
+
+```
+<task-notification><task-id>…</task-id><status>stopped</status>
+<summary>No completion record was found for 2 background agents from the previous session:
+"Re-run the benchmark suite" (a4bab…), "Measure git delivery gap across repos" (abd27…).
+…their transcripts are saved on disk…</summary></task-notification>
+```
+
+Measured 2026-08-14 (Claude Code 2.1.232), the hooks are blind to it: `SessionStart` fires
+about four seconds *before* the notification is written and carries nothing about it,
+`UserPromptSubmit` reports the user's own prompt rather than the notification, and by then
+`Stop`'s `background_tasks` is empty. So the scanner reads it, sets a ⚠ chip naming the lost
+agents, and turns the card `error` — nothing else on the deck can say that work was started
+and never finished. `waiting` and `wrapped` outrank it: a live block on the user, and a deliberate
+close-out, both mean more than a post-mortem.
+
+Two guards, both paid for:
+
+- **Whose text is it.** The first cut matched any line containing the marker and lit up a
+  session that was merely *discussing* a lost agent — off its own tool output. The
+  notification is now identified structurally: a `user` entry with
+  `origin.kind == "task-notification"` whose content is a plain string starting with
+  `<task-notification>`. That also rejects the `queue-operation` twin of the same
+  notification, which carries its own timestamp and would fire a second time.
+- **How old is it.** The deck rescans every transcript on startup, so without a bound a
+  restart would light up every session that ever lost an agent. Notifications older than an
+  hour are ignored.
+
+The notification's own timestamp is the event's identity, so the 10-second scan reports it
+once. The mark clears when the session does something again (any hook-driven `working`) or on
+a `SessionStart` that resets the card.
 
 ### Detecting "waiting" from the transcript — what the hooks alone can't give
 
 In the **built-in Claude Code UI inside VSCode** (as opposed to the terminal) `Notification` **does not fire**, and per Anthropic that is deliberate, not a bug: its semantics are tied to the TUI, and `PermissionRequest` is given in its place. The result at the time was that when Claude stopped and waited, the card stayed blue "working" (issue 2026-07-20) — and that is where the transcript scanner came from.
 
-**Update 2026-08-04 (T-0318, verified empirically against Claude Code 2.1.220):**
+**Update 2026-08-04 (verified empirically against Claude Code 2.1.220):**
 
 - `PermissionRequest` **does fire in VSCode**, the moment the dialog opens, with full `tool_name` and `tool_input`. It does **not** fire for auto-approved calls — so it produces no false alarms.
 - `PostToolUse` **does fire in VSCode**. The opposite claim from v0.6.17 no longer holds; it was fixed along with `PermissionRequest`.
@@ -59,6 +380,11 @@ The thresholds were derived by measuring 11,000+ real tool calls. The decisive c
 
 `Agent` is excluded on purpose: 65% of subagent runs exceed 30 seconds and 37% exceed 120, so no threshold is both short enough to be useful and quiet enough to trust. A false alarm corrects itself — the card returns to blue as soon as the tool finishes.
 
+Two conditions suppress the inference entirely, both added in v0.9.32:
+
+- **A sibling call is still pending.** Claude Code writes the `tool_result`s of one assistant turn together, so a fast tool issued alongside a slow one shows no result for as long as the slow one runs. Excluding `Agent` from the table does not help here: the scanner reports the *newest* pending call, which is the `Edit`, not the `Agent` two seconds before it. Measured 2026-08-10 on a live session — an `Edit` issued 2s after an `Agent` stayed resultless for the subagent's full 3 minutes and pinned the card orange twice. A call with anything older still pending is therefore never aged.
+- **The session runs in `bypassPermissions`.** No permission dialog can open there, so ageing a call into one is a guaranteed false alarm. `AskUserQuestion` / `ExitPlanMode` still block in that mode and are still detected, and a `PermissionRequest` hook that actually reported a dialog is still believed — only the guess is dropped.
+
 - The answer appeared → back to `working`; the `Stop` hook (which does fire in VSCode) takes it from there to `done`.
 - Subagent lines (`isSidechain`) are filtered out — only the main conversation can block the user.
 - A `waiting` state that came from a hook is not cleared by the scanner — except `PermissionRequest`, which explicitly asks for it through `--permission-dialog`, because no hook closes it.
@@ -73,43 +399,43 @@ The hooks are still installed and still useful: in the terminal they work fully,
 
 **The recommended way (v0.6.29+):** `sessiondeck install-hooks` — merges the 11 hooks into `~/.claude/settings.json` with the real installation path, after a backup. Idempotent; `sessiondeck uninstall-hooks` removes them. Supports `--settings <path>` (a specific project's settings, for instance) and `--dry-run`.
 
-**Manual installation (reference):** add this to `~/.claude/settings.json` — replace `D:\Eyal\SessionDeck\hooks` with the real path of the script on your machine:
+**Manual installation (reference):** add this to `~/.claude/settings.json` — replace `C:\path\to\SessionDeck\hooks` with the real path of the script on your machine. **Keep `-WindowStyle Hidden`, and keep it before `-File`** (everything after `-File` is passed to the script): `PreToolUse` and `PostToolUse` fire on every tool call of every session, so without the flag a handful of open sessions produce dozens of console windows a minute. That is not a cosmetic flicker — creating and destroying windows at that rate is shell work, and on 2026-08-06 it drove `explorer.exe` to 103% of a core and dropped the taskbar.
 
 ```json
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\Eyal\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" SessionStart" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" SessionStart" } ] }
     ],
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\Eyal\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" UserPromptSubmit" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" UserPromptSubmit" } ] }
     ],
     "Notification": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\Eyal\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" Notification" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" Notification" } ] }
     ],
     "PermissionRequest": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\Eyal\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" PermissionRequest" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" PermissionRequest" } ] }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\Eyal\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" Stop" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" Stop" } ] }
     ],
     "StopFailure": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\Eyal\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" StopFailure" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" StopFailure" } ] }
     ],
     "SessionEnd": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\Eyal\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" SessionEnd" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" SessionEnd" } ] }
     ],
     "PreToolUse": [
-      { "matcher": "AskUserQuestion|ExitPlanMode", "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\Eyal\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" PreToolUse" } ] }
+      { "matcher": "AskUserQuestion|ExitPlanMode", "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" PreToolUse" } ] }
     ],
     "PostToolUse": [
-      { "matcher": "AskUserQuestion|ExitPlanMode", "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\Eyal\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" PostToolUse" } ] }
+      { "matcher": "AskUserQuestion|ExitPlanMode|Agent", "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" PostToolUse" } ] }
     ],
     "Elicitation": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\Eyal\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" Elicitation" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" Elicitation" } ] }
     ],
     "ElicitationResult": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\Eyal\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" ElicitationResult" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" ElicitationResult" } ] }
     ]
   }
 }
@@ -140,12 +466,63 @@ if ((Test-Path $flag) -and ((Get-Content $flag -Raw).Trim() -eq '0')) { exit 0 }
 
 - The script is fire-and-forget: every failure is swallowed (`exit 0`) so it can never disrupt a session; PowerShell 5.1 compatible.
 - The file is saved as **UTF-8 with BOM**. Its user-facing strings are ASCII since v0.9.0, but the comments still contain non-ASCII characters, and PS 5.1 reads a BOM-less .ps1 as ANSI — keep the same encoding when editing.
+- `wrapped` state (blinking green): **no hook drives it** — it is set by hand, or by whatever runs
+  your end-of-session routine, with `session status --state wrapped`. `done` only means the turn
+  stopped, which happens dozens of times a day; `wrapped` means the session was closed out for
+  good, and it is the one state a hook cannot overwrite: the `Stop` hook of the very turn
+  that set it arrives a second later and would otherwise undo it. Anything that shows real
+  activity (`working` / `waiting` / `error`), or a `SessionStart` on the same id, clears it.
+- `replaced` state (steady white, v0.9.61): **no hook drives it either**, and none CAN — it marks
+  a session whose process was killed after it handed its work to a successor (a relay script
+  does this: it opens a new tab, waits for the new session to be alive, then kills the caller).
+  A killed process fires no `SessionEnd`, so until this state existed the card kept whatever
+  its last turn left, usually `done`, and read as a live session waiting for you, while its
+  dead tab sat in VSCode under the same label as the successor's. The relay script sets it right
+  after the kill with `session status --state replaced --detail "replaced by <name>"`. It is held
+  against `done` / `idle` like `wrapped`, the transcript scanner never infers a wait for it (an
+  unanswered tool call in a dead session's transcript is a corpse, not a dialog), and the orphan
+  sweep closes it ~15s after its tab is gone instead of after the 15-minute TTL — the TTL protects
+  sessions that might still be alive, and this one cannot be. In tab correlation it picks LAST,
+  so the successor carrying the same label keeps the surviving tab and the replaced session gets
+  one only while there is a surplus, i.e. exactly while its dead tab is still open. A
+  `SessionStart` on the same id (someone resumed the dead transcript) clears it.
+  **The dead tab is closed for you (v0.9.62 + connector 0.6.12, reshaped in 0.9.63 + 0.6.13).**
+  The moment a session is marked `replaced` with its tab still open — and again on each 10s
+  sweep, three tries at most, 20s apart — the deck sends the window a `closeSession` command
+  with the session's labels. The extension closes the ONE Claude tab that carries one of them;
+  with none it does nothing, with several it refuses and says so in its Output channel. **It
+  never reveals the session to find the tab, and neither does the deck** — that was the 0.6.12
+  design, withdrawn the same night: revealing a dead session makes Claude Code start a fresh
+  CLI on the old transcript ("Continue from where you left off."), and the revived session
+  carries on from wherever its context says it was. One session, killed at 00:05:15 on
+  05-09-2026, came back that way at 00:13:39 from a click on its tab in VSCode and worked twenty
+  minutes beside its own successor on the same task. So a click on a `replaced` card closes the tab
+  when the window's extension can, and otherwise only raises the window and says why it stops
+  there; it never sends `openSession` for a dead session. The unique-label case is the normal
+  one when the relay script delivers the successor's prompt as a message (its tab is labelled "Claude
+  Code", then the envelope, then its own ai-title — never the dead tab's label). **A window
+  keeps the extension version it loaded with until it reloads**: the sync carries `Version`,
+  and a window that reports none or an older one is not asked at all (`closeSession NOT sent`
+  in the log, once) — reload that window, or close the tab by hand as before.
+  **The revival itself can be refused from outside the deck**, and nothing for it ships with
+  SessionDeck: the relay script writes a marker file per killed session right after the kill,
+  and a separate Claude Code hook of your own blocks every prompt to a session carrying that
+  marker (naming the successor), tells a revived session to stand down on `SessionStart`, and
+  re-marks the card `replaced` after the revival's own hooks painted it idle. A keyword the user
+  types removes the marker for a deliberate revival.
+- A prompt that arrives as a **cross-session message** (a relay script can hand a successor its
+  instruction with the `SendMessage` tool, because text typed into the input box is never
+  submitted) is written to the transcript wrapped in `<cross-session-message …>` with
+  `isMeta=true` and the harness's own guidance appended after the closing tag. The deck strips the
+  envelope in the card's detail (`Sanitize`) and in the transcript reader's title (the one
+  `isMeta` entry it accepts), and keeps the raw envelope as an extra tab-label candidate, since
+  VSCode may label the tab with what it saw as the first prompt until an ai-title takes over.
 - `error` state: `StopFailure` gives it a dedicated hook. Claude Code exposes no generic error event, so anything that isn't a failed turn stays unmapped.
   The state is still available from the CLI (`--state error`) for other scripts; SessionEnd's `reason` is stored and displayed.
 - Manual check without Claude Code:
   ```powershell
-  $exe = "D:\Eyal\SessionDeck\bin\Debug\net10.0-windows\SessionDeck.exe"
-  & $exe session start  --id test1 --workspace "D:\Eyal\SessionDeck" --source startup
+  $exe = "C:\path\to\SessionDeck\bin\Debug\net10.0-windows\SessionDeck.exe"
+  & $exe session start  --id test1 --workspace "C:\path\to\SessionDeck" --source startup
   & $exe session status --id test1 --state working --detail "prompt test"
   & $exe session status --id test1 --state waiting --detail "Claude needs your permission"
   & $exe session status --id test1 --state done
@@ -166,36 +543,47 @@ if ((Test-Path $flag) -and ((Get-Content $flag -Raw).Trim() -eq '0')) { exit 0 }
 
 ## Closing a session the hooks never closed
 
-`SessionEnd` does not fire when a VSCode window closes, so the deck has to work the end of
-a session out for itself. Three sweeps do it, in order of how much they know:
+`SessionEnd` does not fire when a VSCode window closes, when a tab is closed, or while the
+deck is down, so the deck has to work the end of a session out for itself. One sweep does it
+(`RefreshOrphanSessions`, every 10s), and which wait applies depends on how much it knows:
 
-| Sweep | Fires when | Wait |
+| Shape | Fires when | Wait |
 |---|---|---|
-| VSCode window exit (v0.9.9) | the workspace's last extension connector went away | 90s |
-| Orphan | no living host, and nothing has happened | 15 min on **both** |
+| Exit record | the transcript ends on the CLI's own `cost-state` exit entry, no hook since | none |
+| Replaced | a session marked `replaced` whose tab is gone | 5s |
+| Window exit | the session's own VSCode window was seen connect and is now gone | 90s |
+| Tab closed | the exact tab the session was matched to was seen leaving VSCode | 60s, and silent since |
+| Orphan | no tab answers to the session, or no window at all, and nothing has happened | 15 min on **both** |
 | Ghost / phantom | titleless with no transcript on disk | 30 min |
 
-**The window exit is an event, not an inference** — that is why it needs no activity
+**The window exit is an event, not an inference**, which is why it needs no activity
 threshold and closes in 90 seconds rather than 15 minutes. The 90s is only there to tell an
-exit from a reload: `Developer: Reload Window`, a VSCode update and an extension-host
-restart all disconnect and reconnect, measured at up to 25s apart. A connector back for
-that workspace inside the window cancels the close outright.
+exit from a reload: `Developer: Reload Window`, a VSCode update and an extension-host restart
+all disconnect and reconnect, measured at up to 25s apart, and a window back inside the wait
+cancels the close. It is asked per window, not per folder: several windows can have one
+folder open, and one of them closing says nothing about sessions living in the others.
+
+Every wait is counted in **swept time**, from the first sweep that saw the condition, never
+from a wall-clock stamp. Sleeping the machine drops every connector at once and the
+extensions take a few seconds after the wake to come back; a wall-clock wait would read the
+lid as every window exiting and close everything.
 
 Two things are deliberately **not** treated as proof a session is alive:
 
 - **A restored tab.** VSCode reopens the Claude tab of a long-dead session with its old
   title, so it correlates and looks live. Only a hook revives a session the deck
-  auto-closed (`orphaned`, `stale`, `vscode-closed`); reopening the window does not.
+  auto-closed (`orphaned`, `stale`, `replaced`, `exited`); reopening the window does not.
 - **The transcript's mtime.** Claude Code appends a timestampless
   `{"type":"last-prompt"}` record when a tab opens or closes, so a file nobody has talked
   to in days keeps getting a fresh mtime. Activity is read from the last real timestamp
   *inside* the file (`LastMessageAtUtc`) instead.
 
-Only sessions the transcript reports as `"entrypoint":"claude-vscode"` are closed with the
-window. A terminal session (`cli`, `sdk-cli`) in the same folder outlives it and stays on
-the orphan path, and so does a session that has not been scanned yet — the engine
-underneath stays generic (decision 13).
+Only a session that runs inside VSCode (`"entrypoint":"claude-vscode"`, and not a
+`claude -p` run, which inherits that value from the session that launched it) is closed with
+its window. A terminal session in the same folder outlives the window and stays on the
+orphan path, and so does a session whose host is not known yet - the engine underneath stays
+generic (decision 13).
 
 A wrong close is recoverable: the next hook from that session revives the card. Quitting
-SessionDeck is not a close — tearing the pipe down disconnects every extension at once, and
+SessionDeck is not a close - tearing the pipe down disconnects every extension at once, and
 that path is suppressed explicitly.

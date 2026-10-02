@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
@@ -15,6 +15,38 @@ public enum BindState { Connected, Disconnected }
 public sealed class WorkspaceViewModel : INotifyPropertyChanged
 {
     public int Id { get; init; }
+
+    // ---- group cards ----
+    //
+    // Several VSCode instances can share one folder (e.g. ~/.claude), so by path they are ONE
+    // workspace and the deck drew them as one card with a heading per window. With 40 sessions on
+    // it that card ran far taller than every other and broke the wrap, so a workspace that has
+    // session groups now draws one card PER GROUP instead.
+    //
+    // The split is presentation only, and deliberately so. The parent stays the single entry in
+    // MainViewModel.Workspaces and keeps the authoritative Sessions collection, so persistence,
+    // the connector, every sweep and every scan go on seeing exactly one .claude workspace and
+    // needed no change. A group card is a mirror: same session objects, filtered by their GroupId
+    // stamp, rebuilt by MainWindow.RepartitionGroupCards.
+
+    /// <summary>The group this card shows, "" on an ordinary card. Set once at creation.</summary>
+    public string GroupId { get; init; } = "";
+
+    /// <summary>The card this one was split off, null on an ordinary card.</summary>
+    public WorkspaceViewModel? Parent { get; init; }
+
+    public bool IsGroupCard => Parent != null;
+
+    /// <summary>The workspace that actually owns the state: the parent for a group card, itself
+    /// for every other. Anything reaching past presentation — persistence, connectors, the
+    /// session engine — goes through this and never through the card it was clicked on.</summary>
+    public WorkspaceViewModel Owner => Parent ?? this;
+
+    /// <summary>This card's group cards, empty unless it was split. Ordinary cards never
+    /// allocate one.</summary>
+    public List<WorkspaceViewModel> GroupCards { get; } = new();
+
+    public bool IsSplit => GroupCards.Count > 0;
 
     private string _path = "";
     /// <summary>Folder path; empty for drag-in adds until a hook reports cwd (decision 21).</summary>
@@ -115,6 +147,57 @@ public sealed class WorkspaceViewModel : INotifyPropertyChanged
         Raise(nameof(ClaudeTabsTooltip));
     }
 
+    // ---- the card's badge (optional, from config.json BadgesFile) ----
+    //
+    // A small pill in the card header that an external tool fills in: whatever is worth
+    // reading before opening another session on this card. The producer owns the words and
+    // the level; the deck only draws them, and only while they are current.
+
+    private string _badgeText = "";
+    /// <summary>Empty when there is nothing current to show; see <see cref="Services.BadgeReader"/>.</summary>
+    public string BadgeText
+    {
+        get => _badgeText;
+        private set { if (_badgeText != value) { _badgeText = value; Raise(); Raise(nameof(HasBadge)); } }
+    }
+
+    public bool HasBadge => _badgeText.Length > 0;
+
+    private string _badgeTooltip = "";
+    public string BadgeTooltip
+    {
+        get => _badgeTooltip;
+        private set { if (_badgeTooltip != value) { _badgeTooltip = value; Raise(); } }
+    }
+
+    private Brush _badgeBrush = Brushes.Gainsboro;
+    /// <summary>The pill's own colour, from the producer's level: grey below 60, orange from
+    /// 60, red from 85.</summary>
+    public Brush BadgeBrush
+    {
+        get => _badgeBrush;
+        private set { if (!Equals(_badgeBrush, value)) { _badgeBrush = value; Raise(); } }
+    }
+
+    private static readonly Brush BadgeCalm = new SolidColorBrush(Color.FromRgb(0xDD, 0xDD, 0xDD));
+    private static readonly Brush BadgeWarm = new SolidColorBrush(Color.FromRgb(0xF0, 0x96, 0x4B));
+    private static readonly Brush BadgeHot  = new SolidColorBrush(Color.FromRgb(0xFF, 0x6B, 0x6B));
+
+    /// <summary>Put this tick's badge on the card, or clear it when there is none. Rendered
+    /// on every tick, so a countdown token stays live between two writes of the file.</summary>
+    public void ApplyBadge(BadgeReading? reading)
+    {
+        if (reading is null)
+        {
+            BadgeText = "";
+            BadgeTooltip = "";
+            return;
+        }
+        BadgeText = BadgeReader.Render(reading.Text);
+        BadgeTooltip = BadgeReader.Render(reading.Tooltip);
+        BadgeBrush = reading.Level >= 85 ? BadgeHot : reading.Level >= 60 ? BadgeWarm : BadgeCalm;
+    }
+
     /// <summary>How long a reported active tab stays believable without a refresh. The
     /// extension heartbeats every 2s while focused, so three missed beats expire it.</summary>
     public static TimeSpan ActiveTabTtl { get; set; } = TimeSpan.FromSeconds(6);
@@ -146,6 +229,51 @@ public sealed class WorkspaceViewModel : INotifyPropertyChanged
     /// <summary>The workspace's Claude Code transcripts folder, learned from the first hook
     /// that reports transcript_path. Used to list historical sessions (expanded view).</summary>
     public string? TranscriptDir { get; set; }
+
+    // ---- usage, for the deck sort order (feature 09-08-2026) ----
+
+    /// <summary>Last event from a session a person opened on this card, or the last time the
+    /// user opened the card from the deck. A headless run and a ghost do not count —
+    /// MainWindow.TouchUsage owns that rule. Persisted; rebuilt from the card's sessions at
+    /// schema 4. Sorting only — no notification needed, the sort moves the item itself.</summary>
+    public DateTime? LastUsedAt { get; set; }
+
+    /// <summary>Sessions a person has opened on this card. Persisted, and only ever
+    /// incremented — once per session, by TouchUsage.</summary>
+    public int UseCount { get; set; }
+
+    /// <summary>When this card's LAST VSCode window went away, or null while one is
+    /// connected (and on a card that never had one). Runtime only — a restart starts over,
+    /// which is right: nothing is known about a window that closed before the deck ran.
+    ///
+    /// It is what separates "the host of these sessions has exited" from "this card has no
+    /// connector and never did" — a terminal session or a headless run. The first is proof;
+    /// the second proves nothing, so only the first earns the fast orphan close.</summary>
+    public DateTime? WindowGoneAt { get; set; }
+
+    /// <summary>Which VSCode processes were connected the last time the tab union was
+    /// recomputed, as a stable signature. A tab vanishing only means the user closed it while
+    /// the SAME windows are still there; a window reloading, connecting or disconnecting
+    /// takes a whole instance's tabs out of the union at once, which would otherwise read as
+    /// every session in it losing its tab in the same second. Runtime only.</summary>
+    public string ConnectorSignature { get; set; } = "";
+
+    /// <summary>When that signature last moved. The witness waits this out rather than merely
+    /// resetting on the change, because resetting alone does not work: the reset happens in
+    /// ApplyConnectorState and the witness runs in ReapplyTabCorrelation, immediately after, in
+    /// the same cycle — so the pass that re-arms is the one the reset was meant to stop.
+    /// Measured 12-09-2026 on the deck's own shutdown: three connectors dropped in three
+    /// milliseconds, and every session in each departing window was witnessed as having lost
+    /// its tab, which is precisely the mass false close the fifteen-minute TTL exists to
+    /// prevent. Runtime only.</summary>
+    public DateTime ConnectorsChangedAt { get; set; } = DateTime.MinValue;
+
+    /// <summary>Claude tabs no session answers for: not taken by an open session, and not
+    /// matching a closed one either (a dead session's leftover tab is explained, so it does not
+    /// count). Recomputed by ReapplyTabCorrelation. While this is above zero the orphan sweep
+    /// cannot PROVE any particular session is tabless, because one of these might be its —
+    /// see RefreshOrphanSessions. Runtime only.</summary>
+    public int UnexplainedTabs { get; set; }
 
     // ---- live window binding (engine reuse from stage A/B) ----
 
@@ -206,14 +334,19 @@ public sealed class WorkspaceViewModel : INotifyPropertyChanged
         {
             if (_expanded == value) return;
             _expanded = value;
+            ExpandedAt = value ? DateTime.Now : null;
             RefreshSessionVisibility();
             Raise();
         }
     }
 
+    /// <summary>When ▼ was pressed, so the card can collapse itself again — see
+    /// MainWindow.RefreshExpandedCards. Runtime only, like Expanded itself.</summary>
+    public DateTime? ExpandedAt { get; private set; }
+
     public ObservableCollection<SessionViewModel> Sessions { get; } = new();
 
-    // ---- linked tasks from the external tasks file (T-0116); runtime only ----
+    // ---- linked tasks from the external tasks file; runtime only ----
 
     /// <summary>Tasks whose workspace path matches this card, pinned first then file
     /// order. Rebuilt by the controller on every tasks-file reload.</summary>
@@ -236,16 +369,29 @@ public sealed class WorkspaceViewModel : INotifyPropertyChanged
         set { if (_tasksExpanded != value) { _tasksExpanded = value; Raise(); } }
     }
 
-    /// <summary>When the workspace's last VSCode connector went away. Starts the grace
-    /// period after which the window's sessions are closed; cleared the moment a connector
-    /// for this workspace is back, so a window reload or a VSCode update — both a
-    /// disconnect followed by a reconnect seconds later — changes nothing. Runtime only:
-    /// a disconnect the deck never witnessed (it was down itself) must not schedule a
-    /// close, it falls back to the orphan sweep.</summary>
-    public DateTime? VscodeGoneAt { get; set; }
+    private bool _showHeadless;
+    /// <summary>Mirror of the global "show headless sessions" setting, pushed down by the
+    /// controller so the counting properties below can see it. Runtime only.</summary>
+    public bool ShowHeadless
+    {
+        get => _showHeadless;
+        set
+        {
+            if (_showHeadless == value) return;
+            _showHeadless = value;
+            Raise(nameof(HasOpenSessions));
+            Raise(nameof(IsActive));
+        }
+    }
+
+    /// <summary>A session the deck is currently willing to show at all. Headless runs are
+    /// filtered here rather than only in the view, so a card left with nothing but scheduled
+    /// -task sessions stops counting as open and drops out under "Open only" — otherwise
+    /// hiding the sessions would leave an empty card behind, which is worse than the noise.</summary>
+    private bool Countable(SessionViewModel s) => !s.Phantom && (_showHeadless || !s.IsHeadless);
 
     /// <summary>Phantom sessions don't count — they must not float the workspace up.</summary>
-    public bool HasOpenSessions => Sessions.Any(s => !s.Closed && !s.Phantom);
+    public bool HasOpenSessions => Sessions.Any(s => !s.Closed && Countable(s));
 
     /// <summary>Active = bound window or a live session; actives sort to the top.</summary>
     public bool IsActive => _state == BindState.Connected || HasOpenSessions;
@@ -262,14 +408,45 @@ public sealed class WorkspaceViewModel : INotifyPropertyChanged
     {
         foreach (var s in Sessions)
         {
-            bool normal = (!s.Closed || _expanded) && !s.Phantom;
+            // A closed session whose VSCode tab is still open stays in the normal view: the
+            // tab is visible to the user either way, and a card that says the session ended
+            // is the only thing that tells the user so (see MainWindow.RefreshEndedTabs).
+            bool normal = (!s.Closed || _expanded || s.EndedTabOpen) && Countable(s);
             // A matching session is surfaced even if closed; a matching workspace keeps
             // its normal view; otherwise the session is filtered out.
+            // A search also overrides the headless filter, for the same reason "Open only"
+            // stands down while searching: a query is an explicit request to find something,
+            // and a filter that quietly hides the hit is worse than no filter.
             s.Visible = SearchPredicate == null ? normal
                 : !s.Phantom && (SearchPredicate(s) || (SelfMatchesSearch && normal));
         }
+        RefreshGroupHeaders();
         Raise(nameof(HasOpenSessions));
         Raise(nameof(IsActive));
+    }
+
+    /// <summary>Draw a heading on the first VISIBLE row of each window's block, so a card whose
+    /// sessions live in several VSCode instances reads as one section per window instead of one
+    /// long list (the rows keep changing places, and finding the one you want means reading
+    /// every row).
+    ///
+    /// Visibility is the load-bearing part: the first row of a block is often a hidden session
+    /// (headless, phantom, a closed one while collapsed), and hanging the heading on it would
+    /// leave the block that IS shown with no heading at all. Must therefore run after the sort
+    /// AND after every visibility change, which is why it lives here and not in the sorter.</summary>
+    public void RefreshGroupHeaders()
+    {
+        // A split card answers the same need better: each window has its own card now, so the
+        // heading would just repeat the card's own title on every block. Headings survive for a
+        // grouped workspace that was NOT split (no groups configured for its path).
+        bool anyGrouped = Sessions.Any(s => s.HasGroup) && !IsGroupCard && !IsSplit;
+        string? lastGroup = null;
+        foreach (var s in Sessions)
+        {
+            if (!anyGrouped || !s.Visible) { s.ShowGroupHeader = false; continue; }
+            s.ShowGroupHeader = s.GroupId != lastGroup;
+            lastGroup = s.GroupId;
+        }
     }
 
     public SessionViewModel? FindSession(string sessionId)

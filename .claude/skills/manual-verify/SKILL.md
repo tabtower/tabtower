@@ -54,7 +54,7 @@ Install the hooks per `hooks/README.md`, then open a Claude Code session:
 - [ ] Zone "Right half" docks and shrinks the work area; "Off" releases it.
 - [ ] "Left/Right quarter" takes a quarter width; a maximized window stays out.
 - [ ] Custom zone: "Custom left…" opens the size dialog; `2/7` ≈ 28.6%, `40%` and `0.4` work, invalid input disables OK, Cancel restores the previous choice, clicking the active item reopens the dialog, and the size survives a restart.
-- [ ] The zone dropdown has **no full-screen entry**, and `100%` / `1.0` / `1/1` in the size dialog is rejected (OK stays disabled). 90% is the widest accepted. See T-0364: a zone that leaves its monitor no work area pins explorer.exe at 100–430% of a core.
+- [ ] The zone dropdown has **no full-screen entry**, and `100%` / `1.0` / `1/1` in the size dialog is rejected (OK stays disabled). 90% is the widest accepted. Why: a zone that leaves its monitor no work area pins explorer.exe at 100–430% of a core.
 - [ ] **Whole-monitor deck** (what replaced the full-screen zone): zone off + maximize + 📌 on, then restart — it comes back maximized and pinned on the same monitor.
 - [ ] **The shell stays quiet while zoned.** Sample `explorer.exe` once a second (`Win32_PerfRawData_PerfProc_Process`, diff `PageFaultsPersec` with the UInt32 wrap) through off / half / quarter / custom-90%: under 10,000 faults/sec and 20% of a core throughout. Measuring SessionDeck itself proves nothing — it stays at 1–3% while the shell burns.
 - [ ] Zone lock: while active, no title-bar drag, no frame resize (the cursor doesn't change), no double-click maximize, no Win+Shift+Arrow. Minimize/restore work and return exactly to the zone. Turning the zone off restores normal drag/resize.
@@ -84,6 +84,31 @@ Prerequisite: the VSIX is installed and **every VSCode window has been reloaded*
 - [ ] Restarting SessionDeck → the extension reconnects on its own within ~5s ("connected" in the log).
 - [ ] An old session that can't be resumed shows a status-bar message instead of opening an empty tab.
 - [ ] Long titles wrap rather than truncate; hovering a session card lightens its background.
+
+### 6a. Closing a live session's tab by session id (0.9.104 / connector 0.6.16)
+
+The case that needs a human: two tabs carrying the SAME label. The by-label close refuses
+one of those by design, so this is the only path that reaches it.
+
+```powershell
+SessionDeck.exe session new <workspace id> --no-focus     # twice: two untitled sessions
+SessionDeck.exe list                                      # read the two new ids
+SessionDeck.exe session close-tab --id <the first id>
+```
+
+- [ ] Both new tabs read "Claude Code" (an unprompted session keeps the label VSCode gave it).
+- [ ] **The right tab closes** — the one whose id was named, not the other, not the active one.
+- [ ] **The second tab stays open and alive**: clicking its card reveals it, nothing was resumed.
+- [ ] The window's previously active tab is active again afterwards.
+- [ ] Output → "SessionDeck" logs `closeSession <id> by id` then `closed "Claude Code"`.
+- [ ] Repeat with the target's OWN tab active first: it still closes, and the log shows the
+      extra step onto a neighbouring tab that makes the reveal observable.
+- [ ] `session close-tab --id` of a session whose tab was already closed by hand: the log says
+      the reveal RESUMED it into a new tab and that the tab was closed again — and no card in
+      the deck is left working. (It is the one branch that cannot be reached by inspection.)
+- [ ] `session end --id <id> --close-tab` does both, and a plain `session end` touches no tab.
+- [ ] A window still on 0.6.15 refuses with "cannot close a tab by session id", and the log
+      shows nothing was pushed to it.
 
 ## 7. Blink and auto-acknowledge
 

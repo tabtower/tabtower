@@ -5,7 +5,7 @@ using System.Windows.Controls;
 namespace SessionDeck;
 
 /// <summary>
-/// Path input for the external tasks file (T-0116). Empty = feature off. The path may
+/// Path input for the external tasks file. Empty = feature off. The path may
 /// point at a file that doesn't exist yet — the watcher reports that as a visible error
 /// and picks the file up when it appears — but a nonexistent FOLDER can't be watched, so
 /// that case is blocked here.
@@ -32,14 +32,14 @@ public partial class TasksFileDialog : Window
           "newSessionPrompt": "Let's work on task <id> — <name>",
           "tasks": [
             {
-              "id": "T-0042",
+              "id": "task-42",
               "name": "Task name",
               "description": "Short description",
               "status": "in-progress",
               "pinned": true,
-              "workspace": "D:\\BPM\\SessionDeck",
-              "sessions": ["9d089f9a-058e-4afc-a60e-93979b772824"],
-              "url": "obsidian://open?vault=taskdeck&file=..."
+              "workspace": "C:\\path\\to\\project",
+              "sessions": ["00000000-0000-0000-0000-000000000000"],
+              "url": "obsidian://open?vault=tasks&file=..."
             }
           ]
         }
@@ -67,6 +67,9 @@ public partial class TasksFileDialog : Window
           card is done by path. Without it there is no "open session" button.
         - `sessions` — optional. List of Claude Code session UUIDs (many-to-many).
         - `url` — optional. Link that opens the task (via ShellExecute, e.g. obsidian://...).
+        - `sessionPrompt` — optional. This card's own launch phrase, same `<id>`/`<name>`
+          placeholders, used instead of the envelope's `newSessionPrompt`. For a document whose
+          cards are not all the same kind of thing (a list of packages rather than of tasks).
 
         ## Pointing SessionDeck at the file (CLI)
 

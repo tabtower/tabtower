@@ -1,5 +1,5 @@
 ﻿# SessionDeck hook bridge for Claude Code.
-# Version: 0.9.9  (parsed by install.ps1 — keep in sync with SessionDeck.csproj; release.ps1 syncs automatically)
+# Version: 0.10.2  (parsed by install.ps1 — keep in sync with SessionDeck.csproj; release.ps1 syncs automatically)
 # Called by Claude Code hooks with the event name as argument; the hook payload
 # (session_id, cwd, transcript_path, permission_mode + event-specific fields)
 # arrives as JSON on stdin. Everything the payload provides is forwarded to
@@ -13,19 +13,15 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 # Resolve sessiondeck.exe: the exe that ships next to this script first (installed
 # layout: <root>\hooks\<script> — immune to stale PATH in already-open processes),
-# then PATH, then the default dev build location.
+# then PATH.
 $exe = $null
 $sibling = Join-Path (Split-Path $PSScriptRoot -Parent) 'SessionDeck.exe'
 if (Test-Path $sibling) { $exe = $sibling }
 if (-not $exe) { $exe = (Get-Command 'SessionDeck.exe' -ErrorAction SilentlyContinue).Source }
-if (-not $exe) {
-    $devBuild = 'D:\BPM\SessionDeck\bin\Debug\net10.0-windows\SessionDeck.exe'
-    if (Test-Path $devBuild) { $exe = $devBuild }
-}
 if (-not $exe) { exit 0 }
 
 # Read stdin as UTF-8 explicitly — PowerShell 5.1 defaults to the OEM codepage for
-# piped input, which garbles the Hebrew in Claude Code's UTF-8 payload (bug 2026-07-19).
+# piped input, which garbles any non-ASCII text in Claude Code's UTF-8 payload (bug 2026-07-19).
 $stdinReader = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), [System.Text.Encoding]::UTF8)
 $payload = $stdinReader.ReadToEnd() | ConvertFrom-Json
 $sid = $payload.session_id
@@ -55,11 +51,51 @@ function Get-PermissionSubject($p) {
     return $tool
 }
 
+# Is this session a `claude -p` run rather than one a human opened? CLAUDE_CODE_ENTRYPOINT is
+# INHERITED by everything a session spawns, so a batch of `claude -p` runs launched from inside a
+# session reports claude-vscode and reads as interactive - measured 18-08-2026, four dispatched
+# runs sat on a card as sessions the user could click, resume and be blinked at, none of which
+# the user started. The command line is the only ground truth ("claude  -p --dangerously-skip-permissions"
+# against the IDE's "...native-binary\claude.exe --output-format stream-json ..."), but reading it
+# costs ~1.2s through CIM, which is three times the whole bridge's budget for one event.
+#
+# So the cheap half runs first: the exe PATH (10ms) of a session opened in the IDE is always the
+# extension's own binary. Only when that contradicts the environment - the entrypoint claims the
+# IDE while the binary is a standalone CLI - is the expensive half paid, and only that one session
+# pays it. A session the user really opened never reaches the CIM call, and nothing is ever hidden
+# on the cheap signal alone: precision over coverage (hooks/README.md).
+function Test-PrintModeRun {
+    if (-not $env:CLAUDE_PID) { return $false }
+    if ($env:CLAUDE_CODE_ENTRYPOINT -ne 'claude-vscode') { return $false }   # sdk-* classifies itself
+    try { $path = (Get-Process -Id $env:CLAUDE_PID -ErrorAction Stop).Path } catch { return $false }
+    if (-not $path) { return $false }
+    if ($path -match '(?i)extensions\\anthropic\.claude-code') { return $false }
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $($env:CLAUDE_PID)" -ErrorAction SilentlyContinue
+    return [bool]($proc.CommandLine -match '(^|\s)--?p(rint)?(\s|$)')
+}
+
+# WHICH VSCode instance this session is running in. Several instances can have the same
+# folder open, so a window cannot be told from a tab label: two live sessions can carry the
+# same title in two windows, and label correlation then puts one of them in the wrong place.
+#
+# CLAUDE_SECURESTORAGE_CONFIG_DIR is set by exactly one instance's launcher when instances run
+# with separate Claude Code configurations, and every session started there inherits it. Its
+# ABSENCE is a value, not a missing reading: it means the default instance. Only the folder
+# NAME is sent - never a file inside it - and the deck maps that name to a session group
+# through the group's ConfigDir in config.json, so nothing here knows any particular setup.
+function Get-ConfigDirName {
+    $dir = $env:CLAUDE_SECURESTORAGE_CONFIG_DIR
+    if (-not $dir) { return $null }
+    return (Split-Path $dir -Leaf)
+}
+
 $cliArgs = $null
 switch ($HookEvent) {
     'SessionStart' {
         $cliArgs = @('session', 'start', '--id', $sid, '--workspace', $payload.cwd)
         if ($payload.source)          { $cliArgs += @('--source', $payload.source) }
+        $configDir = Get-ConfigDirName
+        if ($configDir)               { $cliArgs += @('--config-dir', $configDir) }
     }
     'UserPromptSubmit' {
         $cliArgs = @('session', 'status', '--id', $sid, '--state', 'working')
@@ -81,8 +117,37 @@ switch ($HookEvent) {
         if (-not $detail)             { $detail = 'Waiting for permission' }
         $cliArgs += @('--detail', $detail, '--permission-dialog')
     }
+    # A turn can end while the session is not free at all: subagents launched with
+    # run_in_background keep running, report back on their own and resume it. The Stop
+    # payload carries the live registry in background_tasks, so the count is a snapshot
+    # and not a start/stop tally (one background agent produced four SubagentStart /
+    # SubagentStop pairs in a controlled run - it stops and resumes whenever it waits).
+    # Only 'subagent' entries are counted: a background shell (a dev server, a long
+    # build) also sits in that list but never wakes anyone, and counting it would pin
+    # the card blue forever. Always sent, including 0, so the next turn clears it.
     'Stop' {
         $cliArgs = @('session', 'status', '--id', $sid, '--state', 'done')
+        $agents = @($payload.background_tasks | Where-Object { $_.type -eq 'subagent' })
+        $cliArgs += @('--agents', $agents.Count)
+        # The SHELL entries of the same registry, forwarded as bare ids and counted as
+        # nothing here. A Monitor and a dev server are the same record at this level -
+        # measured 11-09-2026: an armed Monitor and a backgrounded `sleep 300` both came
+        # back as type=shell, status=running, with only a free-text description between
+        # them. So the hook must not decide: one of them wakes the session and the other
+        # can run all day, and counting both would pin a card that really does want the user.
+        # The deck intersects these ids with the ones the transcript attributes to a
+        # Monitor call, which is the only place the distinction is written down.
+        $shells = @($payload.background_tasks |
+                    Where-Object { $_.type -eq 'shell' -and $_.id } |
+                    ForEach-Object { $_.id })
+        # The trailing comma is load-bearing. An EMPTY argument is dropped outright by
+        # PowerShell's native-command splatting, so on the common Stop - no background shells -
+        # '--tasks' arrived with no value and swallowed the NEXT option instead: measured
+        # 11-09-2026, sessions across the deck had stored LiveTaskIds = ["--workspace"], and
+        # every one of those turns also lost the cwd self-heal that option carries. A lone
+        # comma survives the call and parses to zero ids (RemoveEmptyEntries), which is what
+        # this line always meant to send.
+        $cliArgs += @('--tasks', (($shells -join ',') + ','))
     }
     # The turn died on an API error. Until this event existed SessionDeck had no hook for
     # its 'error' state at all and the card just went quiet.
@@ -115,9 +180,22 @@ switch ($HookEvent) {
         if (-not $detail)             { $detail = 'Waiting for an answer to a question' }
         $cliArgs += @('--detail', $detail)
     }
+    # Also the LEADING edge of the background-agent count. Stop's background_tasks is the
+    # authoritative snapshot, but it only arrives when the turn ENDS - so a session that
+    # announces "I dispatched 3 agents" and keeps working shows nothing on its card until
+    # then, which reads as the feature being broken (reported 18-08-2026). A background Agent
+    # call answers in ~25ms with status 'async_launched', and that is the moment to count it.
+    # Foreground agents are excluded by that same check: their PostToolUse fires when the
+    # agent has FINISHED, so counting one would add an agent that no longer exists.
     'PostToolUse' {
-        if ($payload.tool_name -notin @('AskUserQuestion', 'ExitPlanMode')) { exit 0 }
-        $cliArgs = @('session', 'status', '--id', $sid, '--state', 'working')
+        if ($payload.tool_name -eq 'Agent') {
+            if ($payload.tool_response.status -ne 'async_launched') { exit 0 }
+            $cliArgs = @('session', 'agents', '--id', $sid, '--launched')
+        }
+        elseif ($payload.tool_name -in @('AskUserQuestion', 'ExitPlanMode')) {
+            $cliArgs = @('session', 'status', '--id', $sid, '--state', 'working')
+        }
+        else { exit 0 }
     }
     'SessionEnd' {
         $cliArgs = @('session', 'end', '--id', $sid)
@@ -126,12 +204,54 @@ switch ($HookEvent) {
 }
 if (-not $cliArgs) { exit 0 }
 
+# Asked on the three events that can CREATE a session record, not on every one: SessionStart
+# normally, and UserPromptSubmit / Stop because a session whose SessionStart the deck missed (it
+# was closed, restarting, or being upgraded mid-run) is recreated from whichever event arrives
+# next - and a recreated print run that was never asked reappears as a session the user seems to
+# have opened, which is the whole bug. Everything else skips it, and a session opened in the IDE
+# answers in 10ms without ever reading a command line.
+if ($HookEvent -in @('SessionStart', 'UserPromptSubmit', 'Stop') -and (Test-PrintModeRun)) {
+    $cliArgs += '--print-mode'
+}
+
 # Common payload fields, forwarded on every event that carries them.
 # cwd goes on EVERY event so SessionDeck can recreate a session it no longer knows
 # (e.g. after its workspace was removed from the deck) — self-healing safety net.
 if ($payload.cwd -and $HookEvent -ne 'SessionStart') { $cliArgs += @('--workspace', $payload.cwd) }
+# On the other two events that can CREATE a session record, for the same self-healing reason as
+# cwd above: a session whose SessionStart the deck missed (it was down, restarting, or being
+# upgraded) is recreated from whichever event lands next, and it must not be recreated without
+# knowing which window it is in.
+if ($HookEvent -in @('UserPromptSubmit', 'Stop')) {
+    $configDir = Get-ConfigDirName
+    if ($configDir)               { $cliArgs += @('--config-dir', $configDir) }
+}
+# WHICH PROCESS is speaking. One session id is meant to have exactly one CLI process, and when
+# it has two they both append to the same transcript and the conversation forks in silence —
+# measured 12-09-2026 on a session that answered the user twice from two branches of one
+# file. Nothing else in the payload can see it: the session id is identical by definition, and
+# the transcript is the shared victim rather than the witness. CLAUDE_PID is the CLI's own pid
+# and it is CONSTANT across every event of a session, subagent events included (measured the
+# same night on a probe session: one pid over SessionStart, PreToolUse, SubagentStart,
+# SubagentStop and Stop, with a background agent out), so a second pid is never a subagent and
+# always a second process. The deck decides what it means; the hook only reports it.
+if ($env:CLAUDE_PID)           { $cliArgs += @('--pid', $env:CLAUDE_PID) }
 if ($payload.transcript_path)  { $cliArgs += @('--transcript', $payload.transcript_path) }
 if ($payload.permission_mode)  { $cliArgs += @('--mode', $payload.permission_mode) }
+# Who started this session: claude-vscode for the IDE, sdk-cli for a headless
+# `claude --print` run (a scheduled task, a runner). It is NOT in the hook payload — measured
+# 14-08-2026 across SessionStart/UserPromptSubmit/Stop/SessionEnd — so it is read off the
+# hook's own environment, which Claude Code sets on the process it spawns. Sent on every
+# event, not only SessionStart, so a session that predates this version gets classified on
+# its next one instead of staying unknown until it restarts.
+if ($env:CLAUDE_CODE_ENTRYPOINT) { $cliArgs += @('--entrypoint', $env:CLAUDE_CODE_ENTRYPOINT) }
+# Which session launched this one as a headless run. Nothing in the payload or the process tree
+# can answer that - a headless run is fired through a hidden wscript launcher whose own parent has exited
+# by the time anyone looks - so the launcher stamps it into the environment it hands the child,
+# under a name Claude Code does not overwrite (it DOES overwrite CLAUDE_CODE_SESSION_ID with the
+# child's own id, measured 18-08-2026). Sent on every event so a run whose SessionStart the deck
+# missed still gets attributed to its launcher.
+if ($env:SESSIONDECK_DISPATCHER) { $cliArgs += @('--dispatcher', $env:SESSIONDECK_DISPATCHER) }
 
 & $exe @cliArgs | Out-Null
 exit 0

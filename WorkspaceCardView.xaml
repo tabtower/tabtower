@@ -1,4 +1,4 @@
-<UserControl x:Class="SessionDeck.WorkspaceCardView"
+﻿<UserControl x:Class="SessionDeck.WorkspaceCardView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:SessionDeck"
@@ -14,6 +14,21 @@
             <Style.Triggers>
                 <DataTrigger Binding="{Binding VisibleInDeck}" Value="False">
                     <Setter Property="Visibility" Value="Collapsed"/>
+                </DataTrigger>
+                <!-- A group card sizes to its own content instead of stretching to the row.
+                     Every other card fills that height with its DWM thumbnail; a group card has
+                     none, and its sessions panel is docked to the BOTTOM, so stretching left a
+                     tall empty gap ABOVE the sessions - worse than the long card the split was
+                     meant to fix. Top-aligned, the group cards are each exactly as tall
+                     as they need to be, and the empty one is a header and a button. -->
+                <DataTrigger Binding="{Binding IsGroupCard}" Value="True">
+                    <Setter Property="VerticalAlignment" Value="Top"/>
+                </DataTrigger>
+                <!-- Same reason with the preview band switched off (⚙ menu): nothing is left
+                     to absorb the row's height, so a stretched card is empty space below its
+                     sessions. -->
+                <DataTrigger Binding="{Binding DataContext.ShowWindowPreviews, RelativeSource={RelativeSource AncestorType=Window}}" Value="False">
+                    <Setter Property="VerticalAlignment" Value="Top"/>
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -48,7 +63,7 @@
                              when the first row runs out of room. -->
                         <WrapPanel>
                             <TextBlock Text="{Binding DisplayTitle}" Foreground="White" FontWeight="Bold"
-                                       FontSize="14" MaxWidth="300" TextTrimming="CharacterEllipsis"
+                                       FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=14}" MaxWidth="300" TextTrimming="CharacterEllipsis"
                                        VerticalAlignment="Center"
                                        FlowDirection="{Binding DisplayTitle, Converter={StaticResource Rtl}}"
                                        ToolTip="{Binding TitleTooltip}"/>
@@ -65,7 +80,7 @@
                                         </Style>
                                     </Border.Style>
                                     <!-- branch names come from git and are not always Latin -->
-                                    <TextBlock Foreground="#FFDDDDDD" FontSize="11" MaxWidth="280"
+                                    <TextBlock Foreground="#FFDDDDDD" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}" MaxWidth="280"
                                                TextTrimming="CharacterEllipsis"
                                                FlowDirection="{Binding Branch, Converter={StaticResource Rtl}}">
                                         <Run Text="&#x2387;"/> <Run Text="{Binding Branch}"/>
@@ -83,13 +98,32 @@
                                             </Style.Triggers>
                                         </Style>
                                     </Border.Style>
-                                    <TextBlock Foreground="#FFDDDDDD" FontSize="11">
+                                    <TextBlock Foreground="#FFDDDDDD" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}">
                                         <Run Text="📑"/> <Run Text="{Binding ClaudeTabCount, Mode=OneWay}"/>
+                                    </TextBlock>
+                                </Border>
+                                <!-- the card's badge, written by an external tool (BadgesFile).
+                                     LeftToRight: badges are short ASCII tokens, and an RTL card
+                                     would otherwise reorder their halves. -->
+                                <Border Background="#33FFFFFF" CornerRadius="8" Padding="7,1" Margin="6,1,0,1"
+                                        VerticalAlignment="Center" ToolTip="{Binding BadgeTooltip}">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasBadge}" Value="False">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <TextBlock Foreground="{Binding BadgeBrush}" FlowDirection="LeftToRight"
+                                               FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}">
+                                        <Run Text="{Binding BadgeText, Mode=OneWay}"/>
                                     </TextBlock>
                                 </Border>
                             </StackPanel>
                         </WrapPanel>
-                        <TextBlock Text="{Binding Description}" Foreground="#FFAAAAAA" FontSize="11"
+                        <TextBlock Text="{Binding Description}" Foreground="#FFAAAAAA" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}"
                                    TextTrimming="CharacterEllipsis"
                                    FlowDirection="{Binding Description, Converter={StaticResource Rtl}}">
                             <TextBlock.Style>
@@ -112,7 +146,7 @@
                                 <Setter Property="Padding" Value="6,2"/>
                             </Style>
                         </StackPanel.Resources>
-                        <!-- linked tasks from the external tasks file (T-0116);
+                        <!-- linked tasks from the external tasks file;
                              label = count, disabled at 0, hidden when the feature is off -->
                         <Button x:Name="TasksButton" Click="Tasks_Click">
                             <TextBlock>
@@ -120,7 +154,7 @@
                             </TextBlock>
                             <Button.Style>
                                 <!-- ToolTip lives in the style (not on the element) so the
-                                     open-state trigger can swap it (T-0236) -->
+                                     open-state trigger can swap it -->
                                 <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                                     <Setter Property="ToolTip" Value="Tasks linked to this workspace"/>
                                     <Style.Triggers>
@@ -131,7 +165,7 @@
                                             <Setter Property="IsEnabled" Value="False"/>
                                             <Setter Property="Opacity" Value="0.45"/>
                                         </DataTrigger>
-                                        <!-- pressed look while the inline list is open (T-0236) -->
+                                        <!-- pressed look while the inline list is open -->
                                         <DataTrigger Binding="{Binding TasksExpanded}" Value="True">
                                             <Setter Property="Background" Value="#FF2E4A66"/>
                                             <Setter Property="ToolTip" Value="Hide the tasks"/>
@@ -144,7 +178,7 @@
                         <Button x:Name="ExpandButton" Content="▼" Click="Expand_Click">
                             <Button.Style>
                                 <!-- glyph swap stays in code-behind (SyncExpandGlyph); the style
-                                     adds the matching pressed look + tooltip swap (T-0236) -->
+                                     adds the matching pressed look + tooltip swap -->
                                 <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                                     <Setter Property="ToolTip" Value="Show closed sessions too"/>
                                     <Style.Triggers>
@@ -183,10 +217,27 @@
             <Button Content="+ New session" Click="NewSession_Click" Cursor="Hand"
                     HorizontalAlignment="Left" Padding="10,2" Margin="0,2,0,3"
                     Background="#FF2E4A66" Foreground="White" BorderThickness="0"
-                    ToolTip="Open a new Claude Code conversation in this workspace"/>
+                    ToolTip="Open a new Claude Code conversation in this workspace. Where session groups are configured, the modifier picks which one: none, Ctrl or Alt."/>
             <ItemsControl ItemsSource="{Binding Sessions}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
+                      <StackPanel>
+                        <!-- One heading per VSCode window, on the first visible row of its block.
+                             A card whose sessions all live in one window (the usual case) never
+                             shows one. -->
+                        <TextBlock Text="{Binding GroupLabel}" Foreground="{Binding GroupBrush}"
+                                   FontWeight="Bold" Margin="2,7,2,1" Opacity="0.85"
+                                   FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ShowGroupHeader}" Value="False">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
                         <Border BorderBrush="{Binding BorderBrush}" BorderThickness="2" CornerRadius="5"
                                 Margin="0,3" Padding="8,4" Cursor="Hand"
                                 MouseLeftButtonUp="Session_MouseUp">
@@ -221,13 +272,13 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <!-- primary: the VSCode tab title; wraps instead of truncating -->
-                                    <TextBlock Text="{Binding DisplayTitle}" Foreground="White" FontSize="12"
+                                    <TextBlock Text="{Binding DisplayTitle}" Foreground="White" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=12}"
                                                TextWrapping="Wrap"
                                                FlowDirection="{Binding DisplayTitle, Converter={StaticResource Rtl}}"/>
                                     <!-- secondary session title (AutoTitle via SubTitle) removed by request
                                          2026-07-19; the VM property still exists. To restore, re-add here a
                                          TextBlock bound to SubTitle (wrap + Rtl converter, collapsed when ""). -->
-                                    <TextBlock Text="{Binding SubText}" Foreground="#FF999999" FontSize="10"
+                                    <TextBlock Text="{Binding SubText}" Foreground="#FF999999" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=10}"
                                                TextTrimming="CharacterEllipsis"
                                                FlowDirection="{Binding SubText, Converter={StaticResource Rtl}}">
                                         <TextBlock.Style>
@@ -243,7 +294,7 @@
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
                                             Margin="8,0,0,0">
-                                    <TextBlock Text="📑" FontSize="11" Margin="0,0,6,0"
+                                    <TextBlock Text="📑" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}" Margin="0,0,6,0"
                                                ToolTip="Open as a tab in VSCode">
                                         <TextBlock.Style>
                                             <Style TargetType="TextBlock">
@@ -255,16 +306,137 @@
                                             </Style>
                                         </TextBlock.Style>
                                     </TextBlock>
-                                    <TextBlock Text="{Binding StatusText}" Foreground="#FFBBBBBB" FontSize="11"/>
+                                    <!-- Agents that died with the session's previous process.
+                                         Nothing else on the card can say this. Hidden at zero. -->
+                                    <TextBlock Text="{Binding LostAgentsText}" Foreground="#FFE06C6C" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}" Margin="0,0,6,0"
+                                               ToolTip="{Binding LostAgentsTip}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasLostAgents}" Value="False">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <!-- Subagents, foreground and background alike: why a card
+                                         can sit there with nothing visibly happening. Hidden at
+                                         zero. -->
+                                    <TextBlock Text="{Binding AgentsText}" Foreground="#FFBBBBBB" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}" Margin="0,0,6,0"
+                                               ToolTip="{Binding AgentsTip}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasAgents}" Value="False">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <!-- Headless runs this session dispatched. Its own chip,
+                                         not a second robot: a dispatched run reports somewhere
+                                         else, not back into this conversation, so unlike a
+                                         subagent it does not mean the session will wake itself.
+                                         Hidden at zero. -->
+                                    <TextBlock Text="{Binding DispatchedRunsText}" Foreground="#FF7FB8D8" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}" Margin="0,0,6,0"
+                                               ToolTip="{Binding DispatchedRunsTip}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasDispatchedRuns}" Value="False">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <!-- Monitors this session armed that are still watching.
+                                         Its own chip again: a subagent computes and a dispatched
+                                         run works a task, but a monitor only listens, and what it
+                                         listens for may never arrive. Hidden at zero — which
+                                         includes every background shell the deck could not
+                                         attribute to a Monitor call. -->
+                                    <TextBlock Text="{Binding WatchesText}" Foreground="#FF7FB8D8" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}" Margin="0,0,6,0"
+                                               ToolTip="{Binding WatchesTip}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasWatches}" Value="False">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <!-- Background jobs this session started that are still
+                                         running. Its own chip beside the monitor: a monitor
+                                         listens for something that may never arrive, a job is
+                                         computing and will finish, and which one is out decides
+                                         whether waiting for this card is worth anything. Hidden
+                                         at zero — which still includes every background command
+                                         the deck read as a server nobody is waiting for. -->
+                                    <TextBlock Text="{Binding JobsText}" Foreground="#FF7FB8D8" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}" Margin="0,0,6,0"
+                                               ToolTip="{Binding JobsTip}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasJobs}" Value="False">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <!-- TWO processes are writing this one session. Its own colour,
+                                         not the chip-blue the others share: every chip beside it
+                                         describes the session, and this one says the card may be
+                                         describing half a conversation. Hidden unless proven. -->
+                                    <TextBlock Text="👥" Foreground="#FFE0544A" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}" Margin="0,0,6,0"
+                                               ToolTip="{Binding ForkedTip}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding ForkedProcesses}" Value="False">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <!-- What the session has spent, in input-equivalent tokens
+                                         with the cache discount already applied. The raw count
+                                         is 5-6x higher and only tracks how long it has run.
+                                         Hidden until the session has had a turn. -->
+                                    <TextBlock Text="{Binding TokensText}" Foreground="#FF8FA8C0" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}" Margin="0,0,6,0"
+                                               ToolTip="{Binding TokensTip}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasTokens}" Value="False">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <!-- The window this session runs in is named ONCE, by the
+                                         heading above its block, not on every row: with the rows
+                                         grouped it would be the same word repeated down the card.
+                                         The tooltip still carries it for
+                                         a single row. -->
+                                    <TextBlock Text="{Binding StatusDisplay}" Foreground="#FFBBBBBB" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}"/>
                                 </StackPanel>
                             </Grid>
                         </Border>
+                      </StackPanel>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
             </StackPanel>
 
-            <!-- inline task list (T-0116): the 🗒 button toggles it; same card UI as the
+            <!-- inline task list: the 🗒 button toggles it; same card UI as the
                  tasks page. Docked after the sessions panel so it renders above it. -->
             <StackPanel DockPanel.Dock="Bottom" Margin="8,0,8,2">
                 <StackPanel.Style>
@@ -285,9 +457,52 @@
                 </ItemsControl>
             </StackPanel>
 
-            <!-- live DWM thumbnail of the bound VSCode window -->
-            <Grid Height="170">
-                <Border x:Name="ThumbArea" Background="#FF0D0D0D" Margin="8,6,8,2" CornerRadius="4"/>
+            <!-- Live DWM thumbnail of the bound VSCode window.
+                 Collapsed on a group card: a split card's group cards exist precisely because
+                 the single card was too tall, and their parent binds no window anyway (each
+                 instance typically sets a custom window.title, so BuildTitlePattern's
+                 "<name> - Visual Studio Code" matches none of them). A copy of the
+                 "no window" placeholder per group card would cost 170px each to say nothing. -->
+            <Grid>
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Height" Value="170"/>
+                        <Style.Triggers>
+                            <!-- Previews off: the band goes entirely, 170px per card. -->
+                            <DataTrigger Binding="{Binding DataContext.ShowWindowPreviews, RelativeSource={RelativeSource AncestorType=Window}}" Value="False">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Setter Property="Height" Value="0"/>
+                            </DataTrigger>
+                            <!-- ...except on a card with no window, where the hint below is the
+                                 only thing that says so. Auto = the two lines and nothing more. -->
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding DataContext.ShowWindowPreviews, RelativeSource={RelativeSource AncestorType=Window}}" Value="False"/>
+                                    <Condition Binding="{Binding State}" Value="Disconnected"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Setter Property="Height" Value="Auto"/>
+                            </MultiDataTrigger>
+                            <!-- Last, so a group card is collapsed either way. -->
+                            <DataTrigger Binding="{Binding IsGroupCard}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Setter Property="Height" Value="0"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+                <Border x:Name="ThumbArea" Background="#FF0D0D0D" Margin="8,6,8,2" CornerRadius="4">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Style.Triggers>
+                                <!-- No preview to host: the dark plate would just box the hint. -->
+                                <DataTrigger Binding="{Binding DataContext.ShowWindowPreviews, RelativeSource={RelativeSource AncestorType=Window}}" Value="False">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                </Border>
                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                     <StackPanel.Style>
                         <Style TargetType="StackPanel">
@@ -299,9 +514,9 @@
                             </Style.Triggers>
                         </Style>
                     </StackPanel.Style>
-                    <TextBlock Text="🔌 No VSCode window open" Foreground="#FF888888" FontSize="14"
+                    <TextBlock Text="🔌 No VSCode window open" Foreground="#FF888888" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=14}"
                                HorizontalAlignment="Center"/>
-                    <TextBlock Text="Click to open the project in VSCode" Foreground="#FF555555" FontSize="11"
+                    <TextBlock Text="Click to open the project in VSCode" Foreground="#FF555555" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}"
                                HorizontalAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
             </Grid>

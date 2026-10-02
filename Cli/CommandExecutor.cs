@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.RegularExpressions;
 using SessionDeck.Models;
 using SessionDeck.Services;
@@ -17,7 +17,8 @@ public sealed class CommandExecutor
     {
         "match", "desc", "color", "monitor", "half", "quarter", "custom", "size", "rect", "title",
         "id", "workspace", "state", "path",
-        "detail", "transcript", "source", "mode", "reason", "debug", "file",
+        "detail", "transcript", "source", "mode", "reason", "debug", "file", "agents", "entrypoint",
+        "prompt", "page", "view", "dispatcher", "group", "config-dir", "after", "tasks", "pid",
     };
 
     private readonly MainWindow _window;
@@ -46,12 +47,14 @@ public sealed class CommandExecutor
                 "session" => Session(args),
                 "toggle" => Toggle(args),
                 "tasks" => Tasks(args),
+                "groups" => Groups(),
                 "status" => Status(),
+                "reconcile" => Reconcile(),
                 "log" => LogCmd(args),
                 "activate" => Activate(),
                 "quit" => Quit(),
                 "snapshot" => Snapshot(args),   // internal: render the WPF tree to PNG (debug aid)
-                _ => Err($"unknown command '{args.Command}'. Available: list, add, remove, set, focus, pin, zone, stage, session, toggle, tasks, status, log, quit"),
+                _ => Err($"unknown command '{args.Command}'. Available: list, add, remove, set, focus, pin, zone, stage, session, toggle, tasks, groups, status, reconcile, log, quit"),
             };
         }
         catch (Exception ex)
@@ -81,7 +84,10 @@ public sealed class CommandExecutor
             foreach (var s in w.Sessions.Where(s => (!s.Closed && !s.Phantom) || a.Flags.Contains("all")))
             {
                 string ack = s.Acknowledged ? " ack" : "";
-                sb.AppendLine($"     {s.SessionId}  {s.StatusText}{ack}  {s.DisplayTitle}" +
+                // Which window it runs in, printed for every session that has one. With three
+                // instances on one folder this is what a list is asked for after a window dies.
+                string where = s.HasGroup ? $" @{s.GroupLabel}" : "";
+                sb.AppendLine($"     {s.SessionId}  {s.StatusText}{ack}{where}  {s.DisplayTitle}" +
                               (s.Description.Length > 0 ? $"  — {s.Description}" : ""));
             }
         }
@@ -101,6 +107,17 @@ public sealed class CommandExecutor
 
     private PipeResponse Remove(ParsedArgs a)
     {
+        if (a.Flags.Contains("ghosts"))
+        {
+            bool apply = a.Flags.Contains("apply");
+            var pruned = _window.PruneGhostWorkspaces(apply);
+            if (pruned.Count == 0) return Ok("no ghost cards found");
+            var sb = new StringBuilder();
+            sb.AppendLine(apply ? $"removed {pruned.Count} ghost card(s):"
+                                : $"{pruned.Count} ghost card(s) would be removed (pass --apply):");
+            foreach (var name in pruned) sb.AppendLine("  " + name);
+            return Ok(sb.ToString().TrimEnd());
+        }
         var (ws, err) = ResolveTarget(a);
         if (ws == null) return Err(err!);
         _window.RemoveWorkspace(ws);
@@ -179,16 +196,46 @@ public sealed class CommandExecutor
                 if (!a.Options.TryGetValue("id", out var id)) return Err("session status requires --id <session_id>");
                 if (!a.Options.TryGetValue("state", out var stateStr) ||
                     !SessionStatusNames.TryParse(stateStr, out var status))
-                    return Err("session status requires --state working|waiting|done|error|idle");
+                    return Err("session status requires --state working|waiting|done|wrapped|replaced|error|idle");
                 var (msg, ok) = _window.SetSessionStatus(id, status,
                     a.Options.GetValueOrDefault("workspace", ""), HookInfoFrom(a));
+                return ok ? Ok(msg) : Err(msg);
+            }
+            // Status-neutral on purpose: this rides a PostToolUse, which fires in the middle
+            // of a turn, and pushing a state from there would fight the status machine — it
+            // would clear `wrapped` and the lost-agents mark off a tool call. Only the count moves.
+            case "agents":
+            {
+                if (!a.Options.TryGetValue("id", out var id)) return Err("session agents requires --id <session_id>");
+                if (!a.Flags.Contains("launched")) return Err("session agents requires --launched");
+                var (msg, ok) = _window.NoteAgentLaunched(id, HookInfoFrom(a));
                 return ok ? Ok(msg) : Err(msg);
             }
             case "end":
             {
                 if (!a.Options.TryGetValue("id", out var id)) return Err("session end requires --id <session_id>");
+                // --close-tab: also close the session's VSCode tab. Asked for BEFORE the end,
+                // because ending it may remove the session record outright (an empty session is
+                // dropped rather than archived) and the tab is found through that record.
+                // Opt-in, so the SessionEnd hook keeps ending sessions without touching tabs —
+                // a session usually ends because its tab was closed in the first place.
+                string tabNote = "";
+                if (a.Flags.Contains("close-tab"))
+                {
+                    var (closed, whyTab) = _window.CloseSessionTab(id);
+                    tabNote = closed ? "; closing its VSCode tab" : $"; its VSCode tab was left open: {whyTab}";
+                }
                 var (msg, ok) = _window.EndSession(id, HookInfoFrom(a));
-                return ok ? Ok(msg) : Err(msg);
+                return ok ? Ok(msg + tabNote) : Err(msg);
+            }
+            // The tab of a session that is still ALIVE, closed by session id rather than by its
+            // label — the only way to reach one of several tabs all called "Claude Code", which
+            // is what a script that opens sessions leaves behind (see MainWindow.CloseSessionTab).
+            case "close-tab":
+            {
+                if (!a.Options.TryGetValue("id", out var id)) return Err("session close-tab requires --id <session_id>");
+                var (ok, why) = _window.CloseSessionTab(id);
+                return ok ? Ok($"asked VSCode to close the tab of session {id}") : Err(why);
             }
             case "new":
             {
@@ -198,14 +245,44 @@ public sealed class CommandExecutor
                 foreach (var (k, v) in a.Options) rest.Options[k] = v;
                 var (wsNew, errNew) = ResolveTarget(rest);
                 if (wsNew == null) return Err(errNew!);
-                var (okNew, msgNew) = _window.NewSessionInVscode(wsNew);
-                return okNew ? Ok($"opening a new session in workspace {wsNew.Id}") : Err(msgNew);
+                // --prompt lands in the new session's input box, unsent, exactly as a
+                // click on a tasks-panel card already does. Without it the CLI could
+                // only ever open an EMPTY session, so anything outside the WPF panel
+                // (a protocol handler, a script, another tool) had no way to say what
+                // the session is for.
+                a.Options.TryGetValue("prompt", out var promptNew);
+                // --group aims the session at ONE VSCode instance, i.e. at one session group
+                // This is the only way to say it from outside the window: the
+                // deck's own gesture is a modifier held at the click, and a script has no hand.
+                SessionGroupConfig? groupNew = null;
+                if (a.Options.TryGetValue("group", out var groupId))
+                {
+                    groupNew = _window.GroupById(groupId);
+                    if (groupNew == null)
+                        return Err($"unknown group '{groupId}' — see: sessiondeck groups");
+                }
+                // --after <sid>: open the tab NEXT TO that session's tab (VSCode places a new
+                // editor to the right of the active one, so the extension reveals that tab first).
+                // --no-focus: do not bring the VSCode window to the front, and hand the window's
+                // previously active tab back once the new one exists. Both exist for a relay
+                // script that hands a session over to a successor: without them the new session
+                // opened wherever VSCode put it and took the user's focus.
+                a.Options.TryGetValue("after", out var afterNew);
+                bool focusNew = !a.Flags.Contains("no-focus");
+                var (okNew, msgNew) = _window.NewSessionInVscode(wsNew, promptNew, groupNew, focusNew, afterNew);
+                return okNew
+                    ? Ok($"opening a new session in workspace {wsNew.Id}" +
+                         (groupNew == null ? "" : $" ({groupNew.Name})"))
+                    : Err(msgNew);
             }
             case "open":
             {
                 if (!a.Options.TryGetValue("id", out var id)) return Err("session open requires --id <session_id>");
                 if (Vm.FindSession(id) is not { } found) return Err($"unknown session id {id}");
                 var (ws, session) = found;
+                // Same order as a click on the card: pick the window first, so a folder
+                // open in two windows raises the one the session actually lives in.
+                _window.PointCardAtSessionWindow(ws, session);
                 _window.FocusWorkspace(ws);
                 var (sent, msg) = _window.OpenSessionInVscode(ws, session);
                 return sent ? Ok($"opening session {id} in VSCode") : Err(msg);
@@ -224,8 +301,25 @@ public sealed class CommandExecutor
                 return Ok(sb.Length > 0 ? sb.ToString().TrimEnd() : "(no sessions)");
             }
             default:
-                return Err("session requires: start | status | end | open | new | list");
+                return Err("session requires: start | status | end | close-tab | open | new | list");
         }
+    }
+
+    /// <summary>`sessiondeck groups` — the VSCode instances a new session can be aimed at,
+    /// and whether each one is reachable right now. Read-only: the groups are config
+    /// (%APPDATA%\SessionDeck\config.json → SessionGroups), edited there, not here.</summary>
+    private PipeResponse Groups()
+    {
+        if (_window.SessionGroups.Count == 0)
+            return Ok("(no session groups — every new session goes to the window focused last)");
+        var sb = new StringBuilder();
+        foreach (var g in _window.SessionGroups)
+        {
+            string mod = g.Modifier.Length == 0 ? "(no modifier)" : g.Modifier;
+            sb.AppendLine($"{g.Id,-8} {mod,-12} {_window.GroupStateText(g),-42} {g.Name}");
+            sb.AppendLine($"{"",-8} marker \"{g.TitleMarker}\"  in {g.WorkspacePath}");
+        }
+        return Ok(sb.ToString().TrimEnd());
     }
 
     // ---- custom toggles (feature 2026-07-19) ----
@@ -349,6 +443,15 @@ public sealed class CommandExecutor
         return Ok($"zone: {ModeNames.ToName(mode)}{sizeSuffix} on monitor {monitor + 1}");
     }
 
+    /// <summary>Same as the deck's ↻ button. Exposed on the CLI as well because that is
+    /// the only way to exercise it without clicking, and UI automation is not an option on
+    /// this machine — the manual-verify skill leans on it.</summary>
+    private PipeResponse Reconcile()
+    {
+        var (msg, ok) = _window.ReconcileNow();
+        return ok ? Ok(msg) : Err(msg);
+    }
+
     private PipeResponse Status()
     {
         int connected = Vm.Workspaces.Count(w => w.State == BindState.Connected);
@@ -367,7 +470,7 @@ public sealed class CommandExecutor
             """);
     }
 
-    /// <summary>The external tasks file (T-0116): show / set / turn off from the CLI.
+    /// <summary>The external tasks file: show / set / turn off from the CLI.
     /// Same semantics as the ⚙ dialog — the folder must exist, the file itself may not
     /// yet (the watcher picks it up when it appears).</summary>
     private PipeResponse Tasks(ParsedArgs a)
@@ -395,6 +498,29 @@ public sealed class CommandExecutor
 
         if (Vm.TasksFilePath == null)
             return Ok("tasks: off  (enable: sessiondeck tasks --file \"<path>.json\")");
+
+        // Open/close the page from the CLI. It exists for verification: the deck is a
+        // singleton on a live desktop, so a change to the tasks page cannot be checked by
+        // clicking a second copy, and `snapshot` renders nothing while the page is hidden.
+        if (a.Options.TryGetValue("page", out var page))
+        {
+            if (page is not ("on" or "off")) return Err("--page must be on or off");
+            if (page == "on") _window.ShowTasksPage(); else _window.CloseTasksPage();
+        }
+        // The same door for all three modes, once "page or not" stopped being the whole
+        // question (split view, 12-09-2026). --page stays exactly as it was: it is in the
+        // manual-verify checklist and in muscle memory.
+        if (a.Options.TryGetValue("view", out var view))
+        {
+            switch (view)
+            {
+                case "deck": _window.CloseTasksPage(); break;
+                case "page": _window.ShowTasksPage(); break;
+                case "split": _window.ShowTasksSplit(); break;
+                default: return Err("--view must be deck, page or split");
+            }
+            _window.QueueSave();
+        }
         var p = Vm.TasksPanel;
         string state = p.HasError ? $"ERROR: {p.ErrorText}"
             : $"{p.PinnedTasks.Count + p.OtherTasks.Count} tasks ({p.PinnedTasks.Count} pinned)"
@@ -459,7 +585,21 @@ public sealed class CommandExecutor
         Source: a.Options.GetValueOrDefault("source"),
         Mode: a.Options.GetValueOrDefault("mode"),
         Reason: a.Options.GetValueOrDefault("reason"),
-        PermissionDialog: a.Flags.Contains("permission-dialog"));
+        PermissionDialog: a.Flags.Contains("permission-dialog"),
+        Agents: int.TryParse(a.Options.GetValueOrDefault("agents"), out int agents) ? agents : null,
+        // Sent on every Stop, empty string included, so a turn that ended with nothing
+        // running clears the previous turn's list instead of leaving it to age.
+        TaskIds: a.Options.TryGetValue("tasks", out var taskIds)
+            ? taskIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : null,
+        Entrypoint: a.Options.GetValueOrDefault("entrypoint"),
+        PrintMode: a.Flags.Contains("print-mode"),
+        Dispatcher: a.Options.GetValueOrDefault("dispatcher"),
+        // The CLI process that fired this event. One session id should have exactly one; two
+        // of them alternating is the fork detector's whole input (SessionViewModel.NoteHookPid).
+        Pid: int.TryParse(a.Options.GetValueOrDefault("pid"), out int pid) ? pid : null,
+        Group: a.Options.GetValueOrDefault("group"),
+        ConfigDir: a.Options.GetValueOrDefault("config-dir"));
 
     private (WorkspaceViewModel?, string?) ResolveTarget(ParsedArgs a)
     {

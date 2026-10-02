@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Pipes;
 using System.Text.Json;
 using SessionDeck.Interop;
@@ -69,30 +69,51 @@ public static class CliClient
         sessiondeck list [--all]                  workspaces + sessions (--all includes closed)
         sessiondeck add <folder path>             add a workspace to the deck
         sessiondeck remove <target>
+        sessiondeck remove --ghosts [--apply]     cards no session of a person's ever ran in; lists them unless --apply
         sessiondeck set <target> [--title "..."] [--desc "..."] [--color <c>]   empty value = auto
         sessiondeck focus <target>                activate the workspace's window in place
         sessiondeck pin <target>                  move the window to the Stage + activate
         sessiondeck stage --monitor <n> --half left|right | --full | --rect x,y,w,h
         sessiondeck zone --monitor <n> --half left|right | --quarter left|right | --custom left|right [--size 2/7|40%|0.4] | --off
         sessiondeck status                        app state: version, zone, stage, counts
+        sessiondeck reconcile                     close sessions whose tab or window is gone, now
+                                                  (the deck's ↻ button; the automatic sweep is slower on purpose)
         sessiondeck log [--debug on|off]          diagnostic log dir + toggle debug level (%APPDATA%\SessionDeck\logs)
         sessiondeck quit                          close the running app cleanly (saves config, releases the zone)
         sessiondeck install-hooks [--settings <path>] [--dry-run]     register the Claude Code hooks
         sessiondeck uninstall-hooks [--settings <path>]               remove them (runs locally, app not needed)
         sessiondeck toggle list | get <id> | set <id> on|off    user-defined flags;
                                                   state is mirrored to %APPDATA%\SessionDeck\toggles\<id>
-        sessiondeck tasks [--file "<path>.json" | --off]   external tasks panel (T-0116):
-                                                  no args = show state; --file sets the JSON, --off disables
+        sessiondeck tasks [--file "<path>.json" | --off | --page on|off]   external tasks panel:
+                                                  no args = show state; --file sets the JSON, --off disables,
+                                                  --page opens/closes the full page
+        sessiondeck groups                        the VSCode instances a new session can be aimed at
+                                                  (the session groups) and whether each is reachable
         sessiondeck help
 
         session commands (called by the Claude Code hooks):
         sessiondeck session start  --id <sid> --workspace <cwd path or name> [--title "..."] [--source <s>]
-        sessiondeck session status --id <sid> --state working|waiting|done|error|idle [--detail "..."]
+        sessiondeck session status --id <sid> --state working|waiting|done|wrapped|replaced|error|idle [--detail "..."]
+                                   [--agents <n>]  subagents still running in the background; a
+                                                   done with n>0 lands on working, not "your turn"
+                                   wrapped  = closed out for good by its end-of-session routine (no hook sets it)
+                                   replaced = handed off to a successor and its process was killed;
+                                              the card is swept as soon as its dead tab is closed
+        sessiondeck session agents --id <sid> --launched   one background subagent was just
+                                                   dispatched; +1 to the card's 🤖 chip until
+                                                   the next Stop replaces it with the snapshot
         sessiondeck session end    --id <sid> [--reason <r>]
         sessiondeck session open   --id <sid>          focus VSCode + open/resume the session's tab
-        sessiondeck session new    <target>            open a NEW Claude conversation tab in the workspace
+        sessiondeck session new    <target> [--prompt "..."] [--group <id>] [--after <sid>] [--no-focus]
+                                                       open a NEW Claude conversation tab in the workspace;
+                                                       --group picks WHICH VSCode instance, i.e. which
+                                                       session group (see: sessiondeck groups);
+                                                       --after opens it next to that live session's tab;
+                                                       --no-focus leaves the window and its active tab alone
         sessiondeck session list   [--workspace <name>] [--all]
         all session commands also accept: --transcript <path> --mode <permission_mode>
+                                          --dispatcher <sid>  the session that launched this one
+                                          as a headless run; counted on ITS card, not shown here
 
         <target> = workspace id, or --match "<regex>" on the workspace name/title
         colors   = red, green, orange, blue, gray, yellow, purple, cyan, magenta, white, black, or #RRGGBB
