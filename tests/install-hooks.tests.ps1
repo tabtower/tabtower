@@ -1,4 +1,4 @@
-# Tests for `sessiondeck install-hooks` / `uninstall-hooks`.
+# Tests for `tabtower install-hooks` / `uninstall-hooks`.
 # Runs the built exe against temp settings files via --settings - no app instance needed.
 # Usage: powershell -NoProfile -File tests\install-hooks.tests.ps1 [-Exe <path>]
 [CmdletBinding()]
@@ -8,10 +8,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 # $PSScriptRoot is not available in param defaults under PowerShell 5.1 - resolve here.
-if (-not $Exe) { $Exe = Join-Path (Split-Path $PSScriptRoot -Parent) 'bin\Debug\net10.0-windows\SessionDeck.exe' }
+if (-not $Exe) { $Exe = Join-Path (Split-Path $PSScriptRoot -Parent) 'bin\Debug\net10.0-windows\TabTower.exe' }
 if (-not (Test-Path $Exe)) { throw "exe not found: $Exe - run 'dotnet build' first" }
 
-$workDir = Join-Path $env:TEMP ("sessiondeck-hooks-tests-" + [Guid]::NewGuid().ToString('N'))
+$workDir = Join-Path $env:TEMP ("tabtower-hooks-tests-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $workDir | Out-Null
 $script:failed = 0
 $script:passed = 0
@@ -21,7 +21,7 @@ function Assert($condition, [string]$name) {
     else            { $script:failed++; Write-Host "  FAIL  $name" -ForegroundColor Red }
 }
 
-# SessionDeck.exe is a GUI-subsystem binary: PowerShell 5.1 neither waits for it nor
+# TabTower.exe is a GUI-subsystem binary: PowerShell 5.1 neither waits for it nor
 # captures its output via `&`. Start-Process -Wait with redirected streams does both.
 function Invoke-Hooks([string]$command, [string]$settings, [string[]]$extra = @()) {
     $outFile = Join-Path $workDir 'stdout.txt'
@@ -56,7 +56,7 @@ Assert ($json.hooks.PreToolUse[0].matcher -eq 'AskUserQuestion|ExitPlanMode') "P
 Assert ($json.hooks.PostToolUse[0].matcher -eq 'AskUserQuestion|ExitPlanMode|Agent') "PostToolUse matcher"
 Assert ($json.hooks.SessionStart[0].PSObject.Properties.Name -notcontains 'matcher') "SessionStart has no matcher"
 $cmd = $json.hooks.Stop[0].hooks[0].command
-Assert ($cmd -match '^powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ".+sessiondeck-hook\.ps1" Stop$') "command format ($cmd)"
+Assert ($cmd -match '^powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ".+tabtower-hook\.ps1" Stop$') "command format ($cmd)"
 $bytes = [IO.File]::ReadAllBytes($s)
 Assert (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB)) "written without BOM"
 
@@ -73,14 +73,14 @@ $r = Invoke-Hooks 'install-hooks' $s
 Assert ($r.ExitCode -eq 0) "{}: exit 0"
 Assert ((Read-Json $s).hooks.Stop.Count -eq 1) "{}: hooks added"
 
-# --- Case 3: existing SessionDeck hooks from an OLD path -> replaced, no duplicates ---
-Write-Host "Case 3: old-path SessionDeck hooks are replaced"
+# --- Case 3: existing TabTower hooks from an OLD path -> replaced, no duplicates ---
+Write-Host "Case 3: old-path TabTower hooks are replaced"
 $s = Join-Path $workDir 'oldpath.json'
 @'
 {
   "hooks": {
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\OLD\\PLACE\\hooks\\sessiondeck-hook.ps1\" Stop" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\OLD\\PLACE\\hooks\\tabtower-hook.ps1\" Stop" } ] }
     ]
   }
 }
@@ -123,7 +123,7 @@ $before = Get-Content $s -Raw
 $r = Invoke-Hooks 'install-hooks' $s
 Assert ($r.ExitCode -ne 0) "non-zero exit"
 Assert ((Get-Content $s -Raw) -eq $before) "file untouched"
-Assert (-not (Get-ChildItem "$s.sessiondeck-backup-*" -ErrorAction SilentlyContinue)) "no backup written"
+Assert (-not (Get-ChildItem "$s.tabtower-backup-*" -ErrorAction SilentlyContinue)) "no backup written"
 
 # --- Case 6: second run in a row -> content unchanged (only a new backup) ---
 Write-Host "Case 6: idempotent re-run"
@@ -134,7 +134,7 @@ Start-Sleep -Seconds 1   # distinct backup timestamp
 $r = Invoke-Hooks 'install-hooks' $s
 Assert ($r.ExitCode -eq 0) "exit 0"
 Assert ((Get-Content $s -Raw) -eq $first) "content identical"
-Assert ((Get-ChildItem "$s.sessiondeck-backup-*").Count -eq 1) "backup created on the run that had a file"
+Assert ((Get-ChildItem "$s.tabtower-backup-*").Count -eq 1) "backup created on the run that had a file"
 
 # --- Case 7: uninstall returns the file to its original state ---
 Write-Host "Case 7: uninstall restores the original shape"
@@ -158,12 +158,12 @@ Assert ($json.model -eq 'opus') "top-level field kept"
 Assert ($json.hooks.Stop.Count -eq 1) "foreign Stop group kept"
 Assert ($json.hooks.Stop[0].hooks[0].command -eq 'other-tool.exe notify') "foreign command kept"
 $sdLeft = $events | Where-Object { $json.hooks.$_ } | Where-Object {
-    ($json.hooks.$_ | ForEach-Object { $_.hooks } | ForEach-Object { $_.command }) -match 'sessiondeck-hook'
+    ($json.hooks.$_ | ForEach-Object { $_.hooks } | ForEach-Object { $_.command }) -match 'tabtower-hook'
 }
-Assert (-not $sdLeft) "no SessionDeck commands remain"
+Assert (-not $sdLeft) "no TabTower commands remain"
 Assert ($json.hooks.PSObject.Properties.Name -notcontains 'SessionStart') "emptied event keys removed"
 
-# --- Case 7b: uninstall on a file where ONLY SessionDeck hooks existed -> hooks key removed ---
+# --- Case 7b: uninstall on a file where ONLY TabTower hooks existed -> hooks key removed ---
 Write-Host "Case 7b: hooks key removed when nothing remains"
 $s = Join-Path $workDir 'onlyours.json'
 Set-Content -Path $s -Value '{}'
@@ -182,7 +182,7 @@ Assert ($r.ExitCode -eq 0) "exit 0"
 Assert ((Get-Content $s -Raw) -eq $before) "file untouched"
 Assert ($r.Output -match 'SessionStart') "planned result printed"
 
-# --- Case 9: SessionDeck command co-mingled inside a group with a foreign command ---
+# --- Case 9: TabTower command co-mingled inside a group with a foreign command ---
 Write-Host "Case 9: shared group - only our entry is removed"
 $s = Join-Path $workDir 'shared.json'
 @'
@@ -191,7 +191,7 @@ $s = Join-Path $workDir 'shared.json'
     "Stop": [
       { "hooks": [
           { "type": "command", "command": "other-tool.exe notify" },
-          { "type": "command", "command": "powershell -File \"C:\\OLD\\hooks\\sessiondeck-hook.ps1\" Stop" }
+          { "type": "command", "command": "powershell -File \"C:\\OLD\\hooks\\tabtower-hook.ps1\" Stop" }
       ] }
     ]
   }
@@ -202,6 +202,31 @@ $json = Read-Json $s
 $sharedGroup = $json.hooks.Stop | Where-Object { $_.hooks.command -contains 'other-tool.exe notify' }
 Assert ($sharedGroup.hooks.Count -eq 1) "foreign entry survives alone in its group"
 Assert ($json.hooks.Stop.Count -eq 2) "our group added separately"
+
+# --- Case 10: hooks registered under the app's former name -> replaced on install, removed on uninstall ---
+Write-Host "Case 10: former-name hooks are replaced, never doubled"
+$s = Join-Path $workDir 'formername.json'
+$formerScript = 'sessiondeck-hook.ps1'   # public-gate: allow
+@'
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\FORMER\\hooks\\FORMER_SCRIPT\" Stop" } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "AskUserQuestion|ExitPlanMode", "hooks": [ { "type": "command", "command": "powershell -File \"C:\\FORMER\\hooks\\FORMER_SCRIPT\" PreToolUse" } ] }
+    ]
+  }
+}
+'@.Replace('FORMER_SCRIPT', $formerScript) | Set-Content -Path $s
+Invoke-Hooks 'install-hooks' $s | Out-Null
+$json = Read-Json $s
+Assert ($json.hooks.Stop.Count -eq 1) "exactly one Stop group"
+Assert ($json.hooks.PreToolUse.Count -eq 1) "exactly one PreToolUse group"
+Assert ($json.hooks.Stop[0].hooks[0].command -match 'tabtower-hook\.ps1') "the remaining entry is the new script"
+Invoke-Hooks 'uninstall-hooks' $s | Out-Null
+$json = Read-Json $s
+Assert ($json.PSObject.Properties.Name -notcontains 'hooks') "uninstall removes former-name and new entries alike"
 
 Write-Host ""
 Write-Host "==== $script:passed passed, $script:failed failed ===="

@@ -1,8 +1,8 @@
 using System.Windows.Media;
-using SessionDeck.Models;
-using SessionDeck.Services;
+using TabTower.Models;
+using TabTower.Services;
 
-namespace SessionDeck.ViewModels;
+namespace TabTower.ViewModels;
 
 /// <summary>
 /// One task from the external tasks file. Immutable snapshot — the whole list is

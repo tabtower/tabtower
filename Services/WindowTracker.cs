@@ -1,6 +1,6 @@
-using SessionDeck.Interop;
+using TabTower.Interop;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 /// <summary>
 /// Global WinEvent hooks (no polling): title changes, window destruction,

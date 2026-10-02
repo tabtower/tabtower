@@ -1,6 +1,6 @@
-using SessionDeck.Interop;
+using TabTower.Interop;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 public sealed record MonitorEntry(int Index, string Device, RECT Bounds, RECT WorkArea, bool Primary)
 {

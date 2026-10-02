@@ -2,7 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 
-namespace SessionDeck;
+namespace TabTower;
 
 /// <summary>
 /// Path input for the external tasks file. Empty = feature off. The path may
@@ -17,9 +17,9 @@ public partial class TasksFileDialog : Window
     /// <summary>The file contract, for the 📋 button — hand this to whatever produces the
     /// file (a script, Claude, ...). Keep in sync with TasksFileService/TasksDocument.</summary>
     private const string SpecText = """
-        # The SessionDeck tasks file — the JSON contract (version 1)
+        # The TabTower tasks file — the JSON contract (version 1)
 
-        SessionDeck only reads the file (read-only) and refreshes automatically on every save.
+        TabTower only reads the file (read-only) and refreshes automatically on every save.
         The producer (whatever writes the file) owns the content, the order and the colors.
 
         ## File structure (envelope)
@@ -63,7 +63,7 @@ public partial class TasksFileDialog : Window
         - `description` — optional.
         - `status` — optional. Free-form string; the color comes from statusColors.
         - `pinned` — optional (bool). Pinned tasks come first, with a marker and a separator line.
-        - `workspace` — optional. **Full path** of the project folder; matching to a SessionDeck
+        - `workspace` — optional. **Full path** of the project folder; matching to a TabTower
           card is done by path. Without it there is no "open session" button.
         - `sessions` — optional. List of Claude Code session UUIDs (many-to-many).
         - `url` — optional. Link that opens the task (via ShellExecute, e.g. obsidian://...).
@@ -71,12 +71,12 @@ public partial class TasksFileDialog : Window
           placeholders, used instead of the envelope's `newSessionPrompt`. For a document whose
           cards are not all the same kind of thing (a list of packages rather than of tasks).
 
-        ## Pointing SessionDeck at the file (CLI)
+        ## Pointing TabTower at the file (CLI)
 
         ```
-        SessionDeck.exe tasks --file "C:\path\to\tasks.json"   # set the path + turn the panel on
-        SessionDeck.exe tasks                                  # show the current state
-        SessionDeck.exe tasks --off                            # turn the panel off
+        TabTower.exe tasks --file "C:\path\to\tasks.json"   # set the path + turn the panel on
+        TabTower.exe tasks                                  # show the current state
+        TabTower.exe tasks --off                            # turn the panel off
         ```
 
         (or from the UI: ⚙ → "Tasks file (JSON)...")

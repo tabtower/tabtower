@@ -1,6 +1,6 @@
 using System.Windows.Media;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 public static class ColorUtil
 {

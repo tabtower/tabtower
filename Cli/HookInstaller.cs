@@ -1,21 +1,24 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using SessionDeck.Interop;
+using TabTower.Interop;
 
-namespace SessionDeck.Cli;
+namespace TabTower.Cli;
 
 /// <summary>
-/// `sessiondeck install-hooks` / `uninstall-hooks`. Merges the eleven
-/// SessionDeck hooks into ~/.claude/settings.json, pointing at the hook script that ships
+/// `tabtower install-hooks` / `uninstall-hooks`. Merges the eleven
+/// TabTower hooks into ~/.claude/settings.json, pointing at the hook script that ships
 /// next to the installed exe. Runs entirely in the CLI process — never through the pipe —
 /// because it must work before the app has ever started.
 /// </summary>
 public static class HookInstaller
 {
-    /// <summary>Any hook command containing this marker belongs to SessionDeck — removing
-    /// them before re-adding is what makes install idempotent and path-upgrade safe.</summary>
-    private const string ScriptMarker = "sessiondeck-hook.ps1";
+    /// <summary>Any hook command containing one of these markers belongs to TabTower — removing
+    /// them before re-adding is what makes install idempotent and path-upgrade safe. The old
+    /// script name is on the list so an install over a former-name setup REPLACES its eleven
+    /// registrations instead of adding eleven more beside them, and uninstall removes both.</summary>
+    private const string ScriptName = "tabtower-hook.ps1";
+    private static readonly string[] ScriptMarkers = { ScriptName, Services.LegacyName.HookScript };
 
     // Must match hooks/README.md ("Installation") exactly, including the matchers.
     private static readonly (string Event, string? Matcher)[] HookTable =
@@ -53,14 +56,14 @@ public static class HookInstaller
                     dryRun = true;
                     break;
                 default:
-                    return Fail($"unknown option '{args[i]}'. Usage: sessiondeck {args[0]} [--settings <path>] [--dry-run]");
+                    return Fail($"unknown option '{args[i]}'. Usage: tabtower {args[0]} [--settings <path>] [--dry-run]");
             }
         }
 
         // AppContext.BaseDirectory is the exe's directory even under single-file publish.
-        string scriptPath = Path.Combine(AppContext.BaseDirectory, "hooks", "sessiondeck-hook.ps1");
+        string scriptPath = Path.Combine(AppContext.BaseDirectory, "hooks", ScriptName);
         if (install && !File.Exists(scriptPath))
-            return Fail($"hook script not found at {scriptPath} - refusing to register hooks that point nowhere. Reinstall SessionDeck.");
+            return Fail($"hook script not found at {scriptPath} - refusing to register hooks that point nowhere. Reinstall TabTower.");
 
         // Load. A corrupt file must fail without writing; a missing/empty one starts fresh.
         JsonObject root;
@@ -109,7 +112,7 @@ public static class HookInstaller
         string? backupPath = null;
         if (fileExisted)
         {
-            backupPath = $"{settingsPath}.sessiondeck-backup-{DateTime.Now:yyyyMMdd-HHmmss}";
+            backupPath = $"{settingsPath}.tabtower-backup-{DateTime.Now:yyyyMMdd-HHmmss}";
             File.Copy(settingsPath, backupPath, overwrite: true);
         }
 
@@ -120,8 +123,8 @@ public static class HookInstaller
         File.Move(tmp, settingsPath, overwrite: true);
 
         Console.Out.WriteLine(install
-            ? $"SessionDeck hooks installed into {settingsPath}"
-            : $"SessionDeck hooks removed from {settingsPath}");
+            ? $"TabTower hooks installed into {settingsPath}"
+            : $"TabTower hooks removed from {settingsPath}");
         Console.Out.WriteLine($"  hook script: {scriptPath}");
         if (backupPath != null)
             Console.Out.WriteLine($"  backup: {backupPath}");
@@ -129,7 +132,7 @@ public static class HookInstaller
     }
 
     /// <summary>Applies the merge in place. Only touches
-    /// SessionDeck's own groups — hooks of other tools are preserved verbatim.</summary>
+    /// TabTower's own groups — hooks of other tools are preserved verbatim.</summary>
     private static void Merge(JsonObject root, bool install, string scriptPath)
     {
         if (root["hooks"] is not JsonObject hooks)
@@ -164,7 +167,7 @@ public static class HookInstaller
                 {
                     if (inner[j] is JsonObject h &&
                         h["command"] is JsonValue v && v.TryGetValue(out string? cmd) &&
-                        cmd?.Contains(ScriptMarker, StringComparison.OrdinalIgnoreCase) == true)
+                        cmd != null && ScriptMarkers.Any(m => cmd.Contains(m, StringComparison.OrdinalIgnoreCase)))
                         inner.RemoveAt(j);
                 }
                 if (inner.Count == 0)
@@ -194,7 +197,7 @@ public static class HookInstaller
 
     private static int Fail(string message)
     {
-        Console.Error.WriteLine("sessiondeck: " + message);
+        Console.Error.WriteLine("tabtower: " + message);
         return 1;
     }
 }

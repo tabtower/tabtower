@@ -1,10 +1,10 @@
 ﻿using System.Text;
 using System.Text.RegularExpressions;
-using SessionDeck.Models;
-using SessionDeck.Services;
-using SessionDeck.ViewModels;
+using TabTower.Models;
+using TabTower.Services;
+using TabTower.ViewModels;
 
-namespace SessionDeck.Cli;
+namespace TabTower.Cli;
 
 /// <summary>
 /// Executes CLI argv against the live app state. Always invoked on the UI thread
@@ -98,7 +98,7 @@ public sealed class CommandExecutor
     {
         string? path = a.Options.GetValueOrDefault("path") ??
                        (a.Positionals.Count > 0 ? a.Positionals[0] : null);
-        if (path == null) return Err("add requires a folder path: sessiondeck add <path>");
+        if (path == null) return Err("add requires a folder path: tabtower add <path>");
         var (ws, err) = _window.AddWorkspaceFromPath(path);
         if (ws == null) return Err(err!);
         string bind = ws.State == BindState.Connected ? "connected" : "no open window yet";
@@ -239,7 +239,7 @@ public sealed class CommandExecutor
             }
             case "new":
             {
-                // Target parsing shares the workspace resolver: sessiondeck session new <ws id | --match ...>
+                // Target parsing shares the workspace resolver: tabtower session new <ws id | --match ...>
                 var rest = new ParsedArgs { Command = "session" };
                 foreach (var p in a.Positionals.Skip(1)) rest.Positionals.Add(p);
                 foreach (var (k, v) in a.Options) rest.Options[k] = v;
@@ -259,7 +259,7 @@ public sealed class CommandExecutor
                 {
                     groupNew = _window.GroupById(groupId);
                     if (groupNew == null)
-                        return Err($"unknown group '{groupId}' — see: sessiondeck groups");
+                        return Err($"unknown group '{groupId}' — see: tabtower groups");
                 }
                 // --after <sid>: open the tab NEXT TO that session's tab (VSCode places a new
                 // editor to the right of the active one, so the extension reveals that tab first).
@@ -305,9 +305,9 @@ public sealed class CommandExecutor
         }
     }
 
-    /// <summary>`sessiondeck groups` — the VSCode instances a new session can be aimed at,
+    /// <summary>`tabtower groups` — the VSCode instances a new session can be aimed at,
     /// and whether each one is reachable right now. Read-only: the groups are config
-    /// (%APPDATA%\SessionDeck\config.json → SessionGroups), edited there, not here.</summary>
+    /// (%APPDATA%\TabTower\config.json → SessionGroups), edited there, not here.</summary>
     private PipeResponse Groups()
     {
         if (_window.SessionGroups.Count == 0)
@@ -461,7 +461,7 @@ public sealed class CommandExecutor
             ? $"rect {r.Left},{r.Top},{r.Width},{r.Height}"
             : $"{ModeNames.ToName(Vm.StageMode)} (monitor {Vm.StageMonitor + 1})";
         return Ok($"""
-            SessionDeck {version}
+            TabTower {version}
             zone:  {ModeNames.ToName(Vm.ZoneMode)}{(Vm.ZoneMode is ZoneMode.CustomLeft or ZoneMode.CustomRight ? $" {Vm.ZoneSize}" : "")} (monitor {Vm.ZoneMonitor + 1})
             stage: {stage}
             workspaces: {Vm.Workspaces.Count} ({connected} with window, {Vm.Workspaces.Count(w => w.Hidden)} hidden)
@@ -497,7 +497,7 @@ public sealed class CommandExecutor
         }
 
         if (Vm.TasksFilePath == null)
-            return Ok("tasks: off  (enable: sessiondeck tasks --file \"<path>.json\")");
+            return Ok("tasks: off  (enable: tabtower tasks --file \"<path>.json\")");
 
         // Open/close the page from the CLI. It exists for verification: the deck is a
         // singleton on a live desktop, so a change to the tasks page cannot be checked by

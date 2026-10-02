@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Windows.Data;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 /// <summary>
 /// Multiplies a design-time font size by the user's task-font scale (A+ / A− on the

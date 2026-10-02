@@ -1,8 +1,8 @@
 using System.IO;
 using System.Text.Json;
-using SessionDeck.Models;
+using TabTower.Models;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 /// <summary>Outcome of loading the tasks file. Exactly one of Document/FileError is set;
 /// RecordWarnings lists tasks that were skipped (missing id/name) while the rest loaded.

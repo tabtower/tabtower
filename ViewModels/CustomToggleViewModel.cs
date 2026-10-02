@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
-namespace SessionDeck.ViewModels;
+namespace TabTower.ViewModels;
 
 /// <summary>A user-defined toolbar toggle (feature 2026-07-19). State changes are pushed
 /// to the flag file via <see cref="Changed"/> so external processes can read them.</summary>

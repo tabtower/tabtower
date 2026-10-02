@@ -1,6 +1,6 @@
-# SessionDeck — wiring into the Claude Code hooks
+# TabTower — wiring into the Claude Code hooks
 
-`sessiondeck-hook.ps1` translates Claude Code hook events into `sessiondeck session ...` commands, and forwards **everything the payload provides** to SessionDeck:
+`tabtower-hook.ps1` translates Claude Code hook events into `tabtower session ...` commands, and forwards **everything the payload provides** to TabTower:
 
 | Hook | Command | Status | Extra data forwarded |
 |------|---------|--------|----------------------|
@@ -51,7 +51,7 @@ last path segment, for example `.claude-work`) and never opens a file inside it,
 the credentials are. **Its absence is a value**: the default instance, no group, no flag sent.
 
 **The hook knows no setup; the deck does the mapping.** A session group in
-`%APPDATA%\SessionDeck\config.json` claims a folder name through its `ConfigDir`
+`%APPDATA%\TabTower\config.json` claims a folder name through its `ConfigDir`
 (`SessionGroups[].ConfigDir`, compared case-insensitively), and a session reporting that name is
 stamped with that group. A name no group claims stamps nothing. No groups are seeded by default,
 so out of the box the flag is sent and ignored. `--group <id>` is still accepted on the same
@@ -129,7 +129,7 @@ in the config). When off, the sessions are hidden and a card left with none of i
 counting as open, so it drops off the deck under "Open only" instead of lingering empty. A
 search overrides the filter, for the same reason "Open only" stands down while searching.
 
-Of the **31** hook events Claude Code exposes (the authoritative list is the JSON schema of `settings.json` itself), SessionDeck registers these 11. The rest are irrelevant to session state: they either don't change it (`InstructionsLoaded`, `MessageDisplay`, `FileChanged`, `ConfigChange`), are already covered indirectly (`PreCompact`/`PostCompact` — `SessionStart` arrives with `source: compact`), or belong to flows not used here (`WorktreeCreate`, `TeammateIdle`, `TaskCreated`).
+Of the **31** hook events Claude Code exposes (the authoritative list is the JSON schema of `settings.json` itself), TabTower registers these 11. The rest are irrelevant to session state: they either don't change it (`InstructionsLoaded`, `MessageDisplay`, `FileChanged`, `ConfigChange`), are already covered indirectly (`PreCompact`/`PostCompact` — `SessionStart` arrives with `source: compact`), or belong to flows not used here (`WorktreeCreate`, `TeammateIdle`, `TaskCreated`).
 
 ### What the bridge costs, measured
 
@@ -137,7 +137,7 @@ A claim that keeps being repeated, including once in this repo's own code commen
 every tool call pays for two PowerShell starts (`PreToolUse` and `PostToolUse`). It is wrong.
 Claude Code honours the matcher, so those two registrations run **only** for `AskUserQuestion`
 and `ExitPlanMode`. Sampling every `powershell.exe` start on a busy machine for 65 seconds
-caught 55 of them across a dozen tool calls, and not one was `sessiondeck-hook.ps1`; the four
+caught 55 of them across a dozen tool calls, and not one was `tabtower-hook.ps1`; the four
 to five processes per call all belonged to that machine's own unrelated guard hooks.
 
 What one invocation costs (Windows PowerShell 5.1, warm, median of 11 runs, 2026-08-06):
@@ -146,7 +146,7 @@ What one invocation costs (Windows PowerShell 5.1, warm, median of 11 runs, 2026
 |---|---:|---:|
 | `powershell.exe -NoProfile -Command exit`, the floor | 135ms | 188ms |
 | the script up to the exe call (process start, then parse stdin) | 208ms | 240ms |
-| `SessionDeck.exe session status ...` alone, pipe round trip included | 154ms | 67ms |
+| `TabTower.exe session status ...` alone, pipe round trip included | 154ms | 67ms |
 | **the whole bridge, one event, end to end** | **422ms** | **~310ms** |
 
 The exe on its own is already over the sub-100ms target in `CliClient`, and PowerShell roughly
@@ -162,7 +162,7 @@ doubles it. What keeps that from mattering is how rarely it happens. Over 3 days
 | `PreToolUse` + `PostToolUse` (matched) | 2 |
 
 About 2,200 invocations in 72 hours: **0.5 per minute for the whole machine**, near 0.3% of one
-core. Replacing PowerShell with a `sessiondeck hook <Event>` subcommand that reads the payload
+core. Replacing PowerShell with a `tabtower hook <Event>` subcommand that reads the payload
 itself would save roughly 250ms per event, which is a quarter of a second per prompt and per
 turn end, in exchange for a new subcommand and a JSON parser in the exe. Measured that way it
 does not pay, which is why the bridge still looks like this. If the registered set ever grows to
@@ -280,7 +280,7 @@ Attribution cannot be derived, only stamped. Measured 18-08-2026 on a live batch
   inheritance, but Claude Code overwrites it with the child's own id before any hook runs.
 
 So a launcher that wants its runs attributed copies the `CLAUDE_CODE_SESSION_ID` it inherited
-into `SESSIONDECK_DISPATCHER` before it launches anything, every child inherits that, and the hook
+into `TABTOWER_DISPATCHER` before it launches anything, every child inherits that, and the hook
 forwards it as `--dispatcher` on every event. The deck stores it (`DispatchedBy`, persisted: a
 restart mid-batch could never rebuild it) and **recounts** per launcher on every session event rather than keeping a tally, so a
 run that ends, is closed by hand or is swept as an orphan leaves the count on its own.
@@ -350,7 +350,7 @@ In the **built-in Claude Code UI inside VSCode** (as opposed to the terminal) `N
 - `PermissionRequest` **does fire in VSCode**, the moment the dialog opens, with full `tool_name` and `tool_input`. It does **not** fire for auto-approved calls — so it produces no false alarms.
 - `PostToolUse` **does fire in VSCode**. The opposite claim from v0.6.17 no longer holds; it was fixed along with `PermissionRequest`.
 - `PermissionRequest` **has no matching "resolved" event** — it announces that the dialog opened, not that it closed. So it is registered with `--permission-dialog`, and clearing the `waiting` is handed back to the scanner.
-- ⚠️ **The flag does not mark `WaitingFromTranscript` directly** (trying that in v0.8.0 produced an orange→blue→orange flicker). The `tool_use` is indeed written to the **file** about 0.5s before the hook fires, but what matters is when SessionDeck **scanned** it — and scanning is driven by the transcript's mtime, which stops growing exactly while the dialog is open.
+- ⚠️ **The flag does not mark `WaitingFromTranscript` directly** (trying that in v0.8.0 produced an orange→blue→orange flicker). The `tool_use` is indeed written to the **file** about 0.5s before the hook fires, but what matters is when TabTower **scanned** it — and scanning is driven by the transcript's mtime, which stops growing exactly while the dialog is open.
   So `PermissionDialogScanMark` stores `TranscriptScannedAt` as it was when the hook arrived:
   - As long as it hasn't moved, the scanner hasn't read the file since the dialog opened, and an empty `PendingCall` proves nothing. Hold.
   - Once it moves, a scan has seen the file and `PendingCall` can be trusted. No call = answered, so release.
@@ -389,7 +389,7 @@ Two conditions suppress the inference entirely, both added in v0.9.32:
 - Subagent lines (`isSidechain`) are filtered out — only the main conversation can block the user.
 - A `waiting` state that came from a hook is not cleared by the scanner — except `PermissionRequest`, which explicitly asks for it through `--permission-dialog`, because no hook closes it.
 - The countdown runs against the call held in memory, not against the file, because **the transcript freezes while the dialog is open** — re-reading it would never notice time passing.
-- Calibration lives in `%APPDATA%\SessionDeck\config.json` under `PermissionWaitToolSeconds` — a `tool → seconds` map. Only tools listed there are checked; an empty map disables the inference entirely (questions are still detected). Adding `Agent` is at your own risk.
+- Calibration lives in `%APPDATA%\TabTower\config.json` under `PermissionWaitToolSeconds` — a `tool → seconds` map. Only tools listed there are checked; an empty map disables the inference entirely (questions are still detected). Adding `Agent` is at your own risk.
 
 The hooks are still installed and still useful: in the terminal they work fully, and they provide immediate detection (no waiting for a scan).
 
@@ -397,45 +397,45 @@ The hooks are still installed and still useful: in the terminal they work fully,
 
 ## Installation
 
-**The recommended way (v0.6.29+):** `sessiondeck install-hooks` — merges the 11 hooks into `~/.claude/settings.json` with the real installation path, after a backup. Idempotent; `sessiondeck uninstall-hooks` removes them. Supports `--settings <path>` (a specific project's settings, for instance) and `--dry-run`.
+**The recommended way (v0.6.29+):** `tabtower install-hooks` — merges the 11 hooks into `~/.claude/settings.json` with the real installation path, after a backup. Idempotent; `tabtower uninstall-hooks` removes them. Supports `--settings <path>` (a specific project's settings, for instance) and `--dry-run`.
 
-**Manual installation (reference):** add this to `~/.claude/settings.json` — replace `C:\path\to\SessionDeck\hooks` with the real path of the script on your machine. **Keep `-WindowStyle Hidden`, and keep it before `-File`** (everything after `-File` is passed to the script): `PreToolUse` and `PostToolUse` fire on every tool call of every session, so without the flag a handful of open sessions produce dozens of console windows a minute. That is not a cosmetic flicker — creating and destroying windows at that rate is shell work, and on 2026-08-06 it drove `explorer.exe` to 103% of a core and dropped the taskbar.
+**Manual installation (reference):** add this to `~/.claude/settings.json` — replace `C:\path\to\TabTower\hooks` with the real path of the script on your machine. **Keep `-WindowStyle Hidden`, and keep it before `-File`** (everything after `-File` is passed to the script): `PreToolUse` and `PostToolUse` fire on every tool call of every session, so without the flag a handful of open sessions produce dozens of console windows a minute. That is not a cosmetic flicker — creating and destroying windows at that rate is shell work, and on 2026-08-06 it drove `explorer.exe` to 103% of a core and dropped the taskbar.
 
 ```json
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" SessionStart" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" SessionStart" } ] }
     ],
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" UserPromptSubmit" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" UserPromptSubmit" } ] }
     ],
     "Notification": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" Notification" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" Notification" } ] }
     ],
     "PermissionRequest": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" PermissionRequest" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" PermissionRequest" } ] }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" Stop" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" Stop" } ] }
     ],
     "StopFailure": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" StopFailure" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" StopFailure" } ] }
     ],
     "SessionEnd": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" SessionEnd" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" SessionEnd" } ] }
     ],
     "PreToolUse": [
-      { "matcher": "AskUserQuestion|ExitPlanMode", "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" PreToolUse" } ] }
+      { "matcher": "AskUserQuestion|ExitPlanMode", "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" PreToolUse" } ] }
     ],
     "PostToolUse": [
-      { "matcher": "AskUserQuestion|ExitPlanMode|Agent", "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" PostToolUse" } ] }
+      { "matcher": "AskUserQuestion|ExitPlanMode|Agent", "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" PostToolUse" } ] }
     ],
     "Elicitation": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" Elicitation" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" Elicitation" } ] }
     ],
     "ElicitationResult": [
-      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\SessionDeck\\hooks\\sessiondeck-hook.ps1\" ElicitationResult" } ] }
+      { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" ElicitationResult" } ] }
     ]
   }
 }
@@ -445,21 +445,21 @@ The hooks are still installed and still useful: in the terminal they work fully,
 
 ## Toggles (flags) — driving external processes from the toolbar
 
-SessionDeck lets you define toggles that act as **flags for external processes**. It neither knows nor cares what a toggle drives — it only manages the flag: it shows a toolbar button and writes the state to a file any process can read. The Claude Code hook is just one example of such a consumer.
+TabTower lets you define toggles that act as **flags for external processes**. It neither knows nor cares what a toggle drives — it only manages the flag: it shows a toolbar button and writes the state to a file any process can read. The Claude Code hook is just one example of such a consumer.
 
 1. Define a toggle from ⚙ → **"Toggles (flags)..."**: icon, **id**, name and default.
    - The **id** is the flag file name and is therefore **locked after creation** — renaming the display name never moves a path external processes already rely on.
-2. Every click writes `1` (on) or `0` (off) to `%APPDATA%\SessionDeck\toggles\<id>`. The file survives restarts and can be read while the app is closed. A missing file means on.
+2. Every click writes `1` (on) or `0` (off) to `%APPDATA%\TabTower\toggles\<id>`. The file survives restarts and can be read while the app is closed. A missing file means on.
 3. The **ℹ** button on a toggle's row opens a details page with everything needed to wire a process up — id, full path, current state, CLI commands, a PowerShell check snippet, and a ready-to-paste prompt for an AI agent. Every field has a copy button.
 
 Checking the flag from an external process (PowerShell):
 
 ```powershell
-$flag = "$env:APPDATA\SessionDeck\toggles\<id>"
+$flag = "$env:APPDATA\TabTower\toggles\<id>"
 if ((Test-Path $flag) -and ((Get-Content $flag -Raw).Trim() -eq '0')) { exit 0 }
 ```
 
-- Also controllable from the CLI: `sessiondeck toggle list` / `toggle get <id>` / `toggle set <id> off`.
+- Also controllable from the CLI: `tabtower toggle list` / `toggle get <id>` / `toggle set <id> off`.
 - The default only applies the first time (while no flag file exists yet).
 
 ## Notes
@@ -505,7 +505,7 @@ if ((Test-Path $flag) -and ((Get-Content $flag -Raw).Trim() -eq '0')) { exit 0 }
   and a window that reports none or an older one is not asked at all (`closeSession NOT sent`
   in the log, once) — reload that window, or close the tab by hand as before.
   **The revival itself can be refused from outside the deck**, and nothing for it ships with
-  SessionDeck: the relay script writes a marker file per killed session right after the kill,
+  TabTower: the relay script writes a marker file per killed session right after the kill,
   and a separate Claude Code hook of your own blocks every prompt to a session carrying that
   marker (naming the successor), tells a revived session to stand down on `SessionStart`, and
   re-marks the card `replaced` after the revival's own hooks painted it idle. A keyword the user
@@ -521,8 +521,8 @@ if ((Test-Path $flag) -and ((Get-Content $flag -Raw).Trim() -eq '0')) { exit 0 }
   The state is still available from the CLI (`--state error`) for other scripts; SessionEnd's `reason` is stored and displayed.
 - Manual check without Claude Code:
   ```powershell
-  $exe = "C:\path\to\SessionDeck\bin\Debug\net10.0-windows\SessionDeck.exe"
-  & $exe session start  --id test1 --workspace "C:\path\to\SessionDeck" --source startup
+  $exe = "C:\path\to\TabTower\bin\Debug\net10.0-windows\TabTower.exe"
+  & $exe session start  --id test1 --workspace "C:\path\to\TabTower" --source startup
   & $exe session status --id test1 --state working --detail "prompt test"
   & $exe session status --id test1 --state waiting --detail "Claude needs your permission"
   & $exe session status --id test1 --state done
@@ -585,5 +585,5 @@ orphan path, and so does a session whose host is not known yet - the engine unde
 generic (decision 13).
 
 A wrong close is recoverable: the next hook from that session revives the card. Quitting
-SessionDeck is not a close - tearing the pipe down disconnects every extension at once, and
+TabTower is not a close - tearing the pipe down disconnects every extension at once, and
 that path is suppressed explicitly.

@@ -3,10 +3,10 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
-using SessionDeck.Models;
-using SessionDeck.Services;
+using TabTower.Models;
+using TabTower.Services;
 
-namespace SessionDeck;
+namespace TabTower;
 
 /// <summary>
 /// GUI editor for the custom toggles (feature 2026-07-19, redesigned 2026-07-20).
@@ -91,9 +91,9 @@ public partial class TogglesEditorDialog : Window
         DetailsState.Text = File.Exists(path)
             ? $"{(ToggleStore.Read(id, row.DefaultOn) ? "1 (on)" : "0 (off)")}"
             : $"No file yet — the default ({(row.DefaultOn ? "1 / on" : "0 / off")}) will be written on OK";
-        DetailsCli.Text = $"sessiondeck toggle get {id}\r\n" +
-                          $"sessiondeck toggle set {id} on\r\n" +
-                          $"sessiondeck toggle set {id} off";
+        DetailsCli.Text = $"tabtower toggle get {id}\r\n" +
+                          $"tabtower toggle set {id} on\r\n" +
+                          $"tabtower toggle set {id} off";
         DetailsSnippet.Text = $"$flag = \"{path}\"\r\n" +
                               "if ((Test-Path $flag) -and ((Get-Content $flag -Raw).Trim() -eq '0')) { exit 0 }";
         DetailsPrompt.Text = BuildPrompt(id, row.Name.Trim(), path);
@@ -115,12 +115,12 @@ public partial class TogglesEditorDialog : Window
     {
         string named = name.Length > 0 ? $" named \"{name}\"" : "";
         return $"""
-            I have a toggle flag{named} that I control from a toolbar button in SessionDeck.
+            I have a toggle flag{named} that I control from a toolbar button in TabTower.
 
             Its state lives in this file:
                 {path}
             The file contains "1" (on) or "0" (off). A missing file means on. It persists
-            across restarts and can be read at any time, whether or not SessionDeck is running.
+            across restarts and can be read at any time, whether or not TabTower is running.
 
             I want to gate one of my processes on this flag:
             """;

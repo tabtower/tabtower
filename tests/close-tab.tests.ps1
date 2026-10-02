@@ -1,11 +1,11 @@
 # Deck-half test for `session close-tab` / `session end --close-tab` (app 0.9.104).
 #
-# Stands a FAKE VSCode connector on SessionDeck's named pipe so the whole deck path can be
+# Stands a FAKE VSCode connector on TabTower's named pipe so the whole deck path can be
 # driven without touching any of the user's real VSCode windows: the CLI verb, the session lookup,
 # the connector lookup, the 0.6.16 capability gate, and the exact JSON pushed down the pipe.
 # The extension half (closeClaudeTabById) is not reachable from here - it needs a real window.
 #
-# Two things this file works around, both of them SessionDeck's own shape:
+# Two things this file works around, both of them TabTower's own shape:
 #  * WinExe: the CLI writes to the PARENT's console through AttachConsole, so a redirected
 #    stdout on a -NoNewWindow child comes back empty. It is run through cmd.exe, whose own
 #    stdout is the file, so the attached console IS the file.
@@ -13,8 +13,8 @@
 #    The pending read is therefore kept and reused rather than re-issued per call.
 
 $ErrorActionPreference = 'Stop'
-$exe  = "$env:LOCALAPPDATA\Programs\SessionDeck\SessionDeck.exe"
-$ws   = Join-Path ([System.IO.Path]::GetTempPath()) 'sessiondeck-close-tab-fake-ws'
+$exe  = "$env:LOCALAPPDATA\Programs\TabTower\TabTower.exe"
+$ws   = Join-Path ([System.IO.Path]::GetTempPath()) 'tabtower-close-tab-fake-ws'
 if (-not (Test-Path $ws)) { New-Item -ItemType Directory -Path $ws | Out-Null }
 
 $pass = 0; $fail = 0
@@ -36,7 +36,7 @@ function Deck([string[]]$deckArgs) {
     [pscustomobject]@{ Code = $p.ExitCode; Out = ($out -replace "`r", '').Trim() }
 }
 
-$pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'sessiondeck',
+$pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'tabtower',
     [System.IO.Pipes.PipeDirection]::InOut, [System.IO.Pipes.PipeOptions]::Asynchronous)
 $pipe.Connect(5000)
 $writer = New-Object System.IO.StreamWriter($pipe)

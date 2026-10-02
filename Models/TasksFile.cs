@@ -1,8 +1,8 @@
-namespace SessionDeck.Models;
+namespace TabTower.Models;
 
 /// <summary>
 /// The external tasks file: a read-only JSON document produced by an external
-/// tool (e.g. a task tracker's export script). SessionDeck only displays it — the producer owns
+/// tool (e.g. a task tracker's export script). TabTower only displays it — the producer owns
 /// the content, the order and the status→color semantics. Unknown JSON keys are ignored
 /// (forward-compat); only id+name are required per task.
 /// </summary>

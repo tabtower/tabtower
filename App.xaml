@@ -1,8 +1,8 @@
-<Application x:Class="SessionDeck.App"
+<Application x:Class="TabTower.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:SessionDeck"
-             xmlns:services="clr-namespace:SessionDeck.Services"
+             xmlns:local="clr-namespace:TabTower"
+             xmlns:services="clr-namespace:TabTower.Services"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
         <!-- Hebrew-first text renders RTL and right-aligned; anything else stays LTR.

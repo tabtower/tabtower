@@ -1,6 +1,6 @@
 using System.Windows.Threading;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 /// <summary>Anything with a status-driven blinking border (session cards today).</summary>
 public interface IBlinkable

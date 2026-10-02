@@ -1,9 +1,9 @@
 using System.IO;
 using System.Text.Json;
 using System.Windows.Threading;
-using SessionDeck.Models;
+using TabTower.Models;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 /// <summary>
 /// Persistence with permanent auto-save: every change is queued and flushed
@@ -12,7 +12,7 @@ namespace SessionDeck.Services;
 public sealed class ConfigStore
 {
     public static readonly string ConfigDir =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SessionDeck");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TabTower");
     public static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
@@ -29,6 +29,7 @@ public sealed class ConfigStore
 
     public static AppConfig Load()
     {
+        CopyFormerNameConfig();
         MigrateLegacyConfig();
         try
         {
@@ -40,6 +41,36 @@ public sealed class ConfigStore
             // Corrupt config — start fresh rather than crash on startup.
         }
         return new AppConfig();
+    }
+
+    /// <summary>One-time carry-over from the folder of the app's former name
+    /// (<see cref="LegacyName.Product"/>): on the first start, while this app has no config of
+    /// its own yet, everything there except the logs is COPIED here - config.json, the toggle
+    /// files, any state beside them. Copied rather than moved, so the old folder stays intact
+    /// and going back to an old build loses nothing.</summary>
+    private static void CopyFormerNameConfig()
+    {
+        try
+        {
+            string legacyDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), LegacyName.Product);
+            if (File.Exists(ConfigPath) || !File.Exists(Path.Combine(legacyDir, "config.json")))
+                return;
+            foreach (string src in Directory.EnumerateFiles(legacyDir, "*", SearchOption.AllDirectories))
+            {
+                string relative = Path.GetRelativePath(legacyDir, src);
+                if (relative.StartsWith("logs" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                string dst = Path.Combine(ConfigDir, relative);
+                if (File.Exists(dst)) continue;
+                Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+                File.Copy(src, dst);
+            }
+        }
+        catch
+        {
+            // Best-effort, like the migration below: a fresh config is an acceptable fallback.
+        }
     }
 
     /// <summary>One-time migration from the pre-rename WinGrid config location (decision 19).</summary>

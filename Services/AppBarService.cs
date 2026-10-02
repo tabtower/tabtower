@@ -1,8 +1,8 @@
 using System.Windows.Interop;
-using SessionDeck.Interop;
-using SessionDeck.Models;
+using TabTower.Interop;
+using TabTower.Models;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 /// <summary>
 /// Reserved Zone via the AppBar API: the main window docks to a monitor edge
@@ -44,7 +44,7 @@ public sealed class AppBarService
     {
         _source = source;
         _hwnd = source.Handle;
-        _callbackMsg = NativeMethods.RegisterWindowMessage("SessionDeck_AppBarCallback");
+        _callbackMsg = NativeMethods.RegisterWindowMessage("TabTower_AppBarCallback");
         source.AddHook(WndProc);
     }
 

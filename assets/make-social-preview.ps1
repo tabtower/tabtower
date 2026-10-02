@@ -71,7 +71,7 @@ $bAcc   = New-Object System.Drawing.SolidBrush($accent)
 
 $x = 64
 $y = 192
-$g.DrawString('SessionDeck', $fTitle, $bTitle, [float]$x, [float]$y)
+$g.DrawString('TabTower', $fTitle, $bTitle, [float]$x, [float]$y)
 $y += 78
 
 foreach ($line in @('Several Claude Code sessions.', 'Several projects.', 'One deck.')) {

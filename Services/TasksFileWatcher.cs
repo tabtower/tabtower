@@ -1,7 +1,7 @@
 using System.IO;
 using System.Windows.Threading;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 /// <summary>
 /// Live updates for the tasks file: FileSystemWatcher on the containing folder,

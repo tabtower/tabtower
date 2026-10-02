@@ -2,9 +2,9 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
-using SessionDeck.Services;
+using TabTower.Services;
 
-namespace SessionDeck.ViewModels;
+namespace TabTower.ViewModels;
 
 public enum BindState { Connected, Disconnected }
 

@@ -2,9 +2,9 @@ using System.Configuration;
 using System.Data;
 using System.Windows;
 using System.Windows.Interop;
-using SessionDeck.Interop;
+using TabTower.Interop;
 
-namespace SessionDeck
+namespace TabTower
 {
     /// <summary>
     /// Interaction logic for App.xaml

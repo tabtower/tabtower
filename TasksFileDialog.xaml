@@ -1,4 +1,4 @@
-<Window x:Class="SessionDeck.TasksFileDialog"
+<Window x:Class="TabTower.TasksFileDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Tasks file (JSON)" Width="480" SizeToContent="Height"
@@ -13,7 +13,7 @@
             <TextBox x:Name="PathBox" FlowDirection="LeftToRight" TextChanged="Path_Changed"
                      Background="#FF333333" Foreground="White" BorderBrush="#FF555555" Padding="4,3"/>
         </DockPanel>
-        <TextBlock Text="Empty = the panel is off (the default). The file is read-only — SessionDeck never writes to it."
+        <TextBlock Text="Empty = the panel is off (the default). The file is read-only — TabTower never writes to it."
                    Foreground="#FF888888" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
         <TextBlock x:Name="PreviewText" Foreground="#FF7FB2E5" Margin="0,8,0,0" TextWrapping="Wrap"/>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">

@@ -1,7 +1,7 @@
 using System.Diagnostics;
-using SessionDeck.Interop;
+using TabTower.Interop;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 public sealed record CandidateWindow(IntPtr Hwnd, string Title, string ProcessName);
 
@@ -9,7 +9,7 @@ public static class WindowEnumerator
 {
     /// <summary>
     /// Top-level windows eligible for tiling: visible, titled, not tool windows,
-    /// not cloaked (UWP ghosts), and not SessionDeck itself.
+    /// not cloaked (UWP ghosts), and not TabTower itself.
     /// </summary>
     public static List<CandidateWindow> GetCandidates()
     {

@@ -1,9 +1,9 @@
-﻿# SessionDeck hook bridge for Claude Code.
-# Version: 0.10.2  (parsed by install.ps1 — keep in sync with SessionDeck.csproj; release.ps1 syncs automatically)
+﻿# TabTower hook bridge for Claude Code.
+# Version: 0.11.0  (parsed by install.ps1 — keep in sync with TabTower.csproj; release.ps1 syncs automatically)
 # Called by Claude Code hooks with the event name as argument; the hook payload
 # (session_id, cwd, transcript_path, permission_mode + event-specific fields)
 # arrives as JSON on stdin. Everything the payload provides is forwarded to
-# SessionDeck. Fire-and-forget: never blocks or fails the Claude Code session.
+# TabTower. Fire-and-forget: never blocks or fails the Claude Code session.
 # PowerShell 5.1 compatible.
 param(
     [Parameter(Mandatory = $true)][string]$HookEvent
@@ -11,13 +11,13 @@ param(
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-# Resolve sessiondeck.exe: the exe that ships next to this script first (installed
+# Resolve tabtower.exe: the exe that ships next to this script first (installed
 # layout: <root>\hooks\<script> — immune to stale PATH in already-open processes),
 # then PATH.
 $exe = $null
-$sibling = Join-Path (Split-Path $PSScriptRoot -Parent) 'SessionDeck.exe'
+$sibling = Join-Path (Split-Path $PSScriptRoot -Parent) 'TabTower.exe'
 if (Test-Path $sibling) { $exe = $sibling }
-if (-not $exe) { $exe = (Get-Command 'SessionDeck.exe' -ErrorAction SilentlyContinue).Source }
+if (-not $exe) { $exe = (Get-Command 'TabTower.exe' -ErrorAction SilentlyContinue).Source }
 if (-not $exe) { exit 0 }
 
 # Read stdin as UTF-8 explicitly — PowerShell 5.1 defaults to the OEM codepage for
@@ -149,7 +149,7 @@ switch ($HookEvent) {
         # this line always meant to send.
         $cliArgs += @('--tasks', (($shells -join ',') + ','))
     }
-    # The turn died on an API error. Until this event existed SessionDeck had no hook for
+    # The turn died on an API error. Until this event existed TabTower had no hook for
     # its 'error' state at all and the card just went quiet.
     'StopFailure' {
         $cliArgs = @('session', 'status', '--id', $sid, '--state', 'error')
@@ -215,7 +215,7 @@ if ($HookEvent -in @('SessionStart', 'UserPromptSubmit', 'Stop') -and (Test-Prin
 }
 
 # Common payload fields, forwarded on every event that carries them.
-# cwd goes on EVERY event so SessionDeck can recreate a session it no longer knows
+# cwd goes on EVERY event so TabTower can recreate a session it no longer knows
 # (e.g. after its workspace was removed from the deck) — self-healing safety net.
 if ($payload.cwd -and $HookEvent -ne 'SessionStart') { $cliArgs += @('--workspace', $payload.cwd) }
 # On the other two events that can CREATE a session record, for the same self-healing reason as
@@ -251,7 +251,10 @@ if ($env:CLAUDE_CODE_ENTRYPOINT) { $cliArgs += @('--entrypoint', $env:CLAUDE_COD
 # under a name Claude Code does not overwrite (it DOES overwrite CLAUDE_CODE_SESSION_ID with the
 # child's own id, measured 18-08-2026). Sent on every event so a run whose SessionStart the deck
 # missed still gets attributed to its launcher.
-if ($env:SESSIONDECK_DISPATCHER) { $cliArgs += @('--dispatcher', $env:SESSIONDECK_DISPATCHER) }
+# The variable of the app's former name is still honoured, so a launcher written for it keeps working.
+$dispatcher = $env:TABTOWER_DISPATCHER
+if (-not $dispatcher) { $dispatcher = $env:SESSIONDECK_DISPATCHER }   # public-gate: allow
+if ($dispatcher) { $cliArgs += @('--dispatcher', $dispatcher) }
 
 & $exe @cliArgs | Out-Null
 exit 0

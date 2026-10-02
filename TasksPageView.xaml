@@ -1,7 +1,7 @@
-<UserControl x:Class="SessionDeck.TasksPageView"
+<UserControl x:Class="TabTower.TasksPageView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:SessionDeck">
+             xmlns:local="clr-namespace:TabTower">
     <!-- The tasks page (revised design 2026-07-27): replaces the deck's central
          area. Right: the full task list. Left: live session squares grouped by workspace
          (same ViewModels as the cards — statuses and blink stay live). Toolbar and status

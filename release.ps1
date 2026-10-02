@@ -1,9 +1,9 @@
-# SessionDeck release script - one command from committed code to a published GitHub release.
+# TabTower release script - one command from committed code to a published GitHub release.
 # Usage:
-#   .\release.ps1            # full release of the version in SessionDeck.csproj
+#   .\release.ps1            # full release of the version in TabTower.csproj
 #   .\release.ps1 -DryRun    # everything except the sync-commit and the actual release
 #
-# The version in SessionDeck.csproj is the single source of truth. The script:
+# The version in TabTower.csproj is the single source of truth. The script:
 #   guards (clean tree, main, unreleased version) -> syncs the hook-script version header
 #   -> publishes self-contained -> runs the install-hooks tests against the published exe
 #   -> packages the vsix only if the extension changed -> zips -> prepends CHANGELOG.md
@@ -30,14 +30,14 @@ if (git status --porcelain) { Fail "working tree is not clean - commit or stash 
 $branch = git rev-parse --abbrev-ref HEAD
 if ($branch -ne 'main') { Fail "on branch '$branch' - releases are cut from main." }
 
-$csproj = Get-Content (Join-Path $repo 'SessionDeck.csproj') -Raw
-if ($csproj -notmatch '<Version>([0-9]+\.[0-9]+\.[0-9]+)</Version>') { Fail "no <Version> in SessionDeck.csproj" }
+$csproj = Get-Content (Join-Path $repo 'TabTower.csproj') -Raw
+if ($csproj -notmatch '<Version>([0-9]+\.[0-9]+\.[0-9]+)</Version>') { Fail "no <Version> in TabTower.csproj" }
 $ver = $Matches[1]
 $tag = "v$ver"
 
 # Tags are never deleted any more (see the policy below), so nothing to prune.
 git fetch --tags --quiet
-if (git tag --list $tag) { Fail "tag $tag already exists - bump <Version> in SessionDeck.csproj first." }
+if (git tag --list $tag) { Fail "tag $tag already exists - bump <Version> in TabTower.csproj first." }
 
 # Release policy: exactly ONE release on GitHub, always the current version. Every older
 # release is deleted so the page never accumulates self-contained zips nobody downloads.
@@ -64,7 +64,7 @@ if ($releases) { Write-Host "  will delete release(s): $($releases -join ', ')  
 
 # --- Sync the hook script's version header (BOM must survive - PS 5.1 + non-ASCII comments) ---
 Step "Hook script version header"
-$hookPath = Join-Path $repo 'hooks\sessiondeck-hook.ps1'
+$hookPath = Join-Path $repo 'hooks\tabtower-hook.ps1'
 $hookText = [IO.File]::ReadAllText($hookPath)
 if ($hookText -notmatch '(?m)^# Version: (\S+)') { Fail "no '# Version:' header in the hook script." }
 $hookVer = $Matches[1]
@@ -90,19 +90,19 @@ $pubDir = Join-Path $repo 'bin\Release\net10.0-windows\win-x64\publish'
 # Incremental publish silently drops Content files (hooks\) from the output dir
 # once they were published before (MSBuild up-to-date tracking) - always start fresh.
 if (Test-Path $pubDir) { Remove-Item $pubDir -Recurse -Force }
-# Deliberately NOT PublishSingleFile. Bundling the runtime produced a 140MB SessionDeck.exe,
+# Deliberately NOT PublishSingleFile. Bundling the runtime produced a 140MB TabTower.exe,
 # and every install rewrote all of it: explorer.exe then burned a whole core on 200,000+ soft
 # page faults per second and stalled the machine for about a minute, measured on eight installs.
 # Spread over ~200 files the same upgrade rewrites only the assemblies
-# that actually changed - typically SessionDeck.dll alone - and install.ps1 skips the rest by
+# that actually changed - typically TabTower.dll alone - and install.ps1 skips the rest by
 # content hash. Still self-contained, so the zip needs no .NET runtime on the target machine.
 dotnet publish -c Release -r win-x64 --self-contained --nologo -v quiet
 if ($LASTEXITCODE -ne 0) { Fail "dotnet publish failed." }
-$pubExe = Join-Path $pubDir 'SessionDeck.exe'
+$pubExe = Join-Path $pubDir 'TabTower.exe'
 
 $exeVer = ((Get-Item $pubExe).VersionInfo.ProductVersion -split '\+')[0]
 if ($exeVer -ne $ver) { Fail "published exe reports $exeVer, expected $ver." }
-$bytes = [IO.File]::ReadAllBytes((Join-Path $pubDir 'hooks\sessiondeck-hook.ps1'))
+$bytes = [IO.File]::ReadAllBytes((Join-Path $pubDir 'hooks\tabtower-hook.ps1'))
 if (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) { Fail "published hook script lost its BOM." }
 
 Step "install-hooks tests against the published exe"
@@ -114,7 +114,7 @@ Step "VSCode extension"
 $extDir = Join-Path $repo 'vscode-extension'
 $pkg = Get-Content (Join-Path $extDir 'package.json') -Raw | ConvertFrom-Json
 $extVer = $pkg.version
-$vsix = Join-Path $extDir "sessiondeck-connector-$extVer.vsix"
+$vsix = Join-Path $extDir "tabtower-connector-$extVer.vsix"
 
 $extChanged = $true
 if ($prevTag) {
@@ -141,17 +141,17 @@ if ($extChanged -or -not (Test-Path $vsix)) {
     Pop-Location
     if (-not (Test-Path $vsix)) { Fail "vsce did not produce $vsix" }
 } else {
-    Write-Host "  unchanged since $prevTag - reusing sessiondeck-connector-$extVer.vsix"
+    Write-Host "  unchanged since $prevTag - reusing tabtower-connector-$extVer.vsix"
 }
 
 # --- Stage & zip -----------------------------------------------------------------
 Step "Package zip"
-$stage = Join-Path $repo "publish\SessionDeck-$ver-win-x64"
+$stage = Join-Path $repo "publish\TabTower-$ver-win-x64"
 $zip = "$stage.zip"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 # The whole publish directory, not just the exe: without single-file the runtime assemblies
-# and SessionDeck.dll sit beside it and the app does not start without them. hooks\ is in
+# and TabTower.dll sit beside it and the app does not start without them. hooks\ is in
 # there too, as a Content item of the project.
 Copy-Item (Join-Path $pubDir '*') $stage -Recurse
 Copy-Item $vsix $stage
@@ -161,17 +161,17 @@ Write-Host "  $zip ($([math]::Round((Get-Item $zip).Length/1MB)) MB)"
 
 # --- Release notes + publish -------------------------------------------------------
 Step "Release notes"
-$notesFile = Join-Path $env:TEMP "sessiondeck-release-notes-$ver.md"
+$notesFile = Join-Path $env:TEMP "tabtower-release-notes-$ver.md"
 $changes = if ($prevTag) { git log "$prevTag..HEAD" --no-merges --format='- %s' } else { @('- initial packaged release') }
 @"
 **Requirements:** Windows 10 or 11 | VS Code with the Claude Code extension | no .NET runtime needed, this build is self-contained.
 
 ### Install
 
-1. Download ``SessionDeck-$ver-win-x64.zip`` below, then **unblock it before extracting** - Windows marks every downloaded file, and the mark spreads to everything you extract out of it:
+1. Download ``TabTower-$ver-win-x64.zip`` below, then **unblock it before extracting** - Windows marks every downloaded file, and the mark spreads to everything you extract out of it:
 
    ``````powershell
-   Unblock-File .\SessionDeck-$ver-win-x64.zip
+   Unblock-File .\TabTower-$ver-win-x64.zip
    ``````
 
    (Already extracted? ``Get-ChildItem -Recurse | Unblock-File`` inside the folder does the same.)
@@ -182,7 +182,7 @@ $changes = if ($prevTag) { git log "$prevTag..HEAD" --no-merges --format='- %s' 
    powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
    ``````
 
-It installs the app, the VS Code extension and the Claude Code hooks, then starts the deck. **Upgrading** from any earlier version is the same two steps; your settings survive. Full details in the [README](https://github.com/eyalBPM/SessionDeck#getting-started).
+It installs the app, the VS Code extension and the Claude Code hooks, then starts the deck. **Upgrading** from any earlier version is the same two steps; your settings survive. Full details in the [README](https://github.com/tabtower/tabtower#getting-started).
 
 Versions in this zip: app $ver | extension $extVer | hooks $ver
 
@@ -190,7 +190,7 @@ Versions in this zip: app $ver | extension $extVer | hooks $ver
 
 $($changes -join "`n")
 
-Every earlier version: [CHANGELOG.md](https://github.com/eyalBPM/SessionDeck/blob/main/CHANGELOG.md).
+Every earlier version: [CHANGELOG.md](https://github.com/tabtower/tabtower/blob/main/CHANGELOG.md).
 Only this release is kept on the Releases page, but every version's tag survives - ``git checkout v<version>`` rebuilds any of them.
 "@ | Set-Content -Path $notesFile -Encoding UTF8
 Get-Content $notesFile | ForEach-Object { "  | $_" }

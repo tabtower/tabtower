@@ -1,9 +1,9 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using SessionDeck.ViewModels;
+using TabTower.ViewModels;
 
-namespace SessionDeck;
+namespace TabTower;
 
 /// <summary>One task card. All actions delegate to MainWindow — same
 /// code-behind pattern as WorkspaceCardView.</summary>

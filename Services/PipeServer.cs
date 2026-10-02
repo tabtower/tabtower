@@ -2,7 +2,7 @@ using System.IO;
 using System.IO.Pipes;
 using System.Text.Json;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 public sealed record PipeResponse(int ExitCode, string Output);
 
@@ -31,7 +31,7 @@ public sealed class VscodeTab
 
 /// <summary>
 /// A live VSCode-extension connection. The extension keeps its pipe connection open;
-/// SessionDeck pushes commands (e.g. openSession) down it as JSON lines.
+/// TabTower pushes commands (e.g. openSession) down it as JSON lines.
 /// TrySend is safe from any thread.
 /// </summary>
 public sealed class VscodeConnection
@@ -135,7 +135,7 @@ public sealed class VscodeConnection
 /// </summary>
 public sealed class PipeServer : IDisposable
 {
-    public const string PipeName = "sessiondeck";
+    public const string PipeName = "tabtower";
 
     private readonly Func<string[], PipeResponse> _cliHandler;
     private readonly Action<VscodeSyncMessage, VscodeConnection> _syncHandler;

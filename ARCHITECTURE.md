@@ -1,4 +1,4 @@
-# SessionDeck — where the code lives
+# TabTower — where the code lives
 
 A map for finding your way in, not a spec. It answers "which file do I open to change X"
 and "what will that break". The reasoning behind individual decisions lives elsewhere and
@@ -12,7 +12,7 @@ is not repeated here:
 ## The shape, in one paragraph
 
 One exe is both the window and the CLI. Launched with no arguments it raises the WPF window
-plus a named-pipe server at `\\.\pipe\sessiondeck`; launched with arguments it connects to
+plus a named-pipe server at `\\.\pipe\tabtower`; launched with arguments it connects to
 that pipe as a client, prints the response and exits (target: under 100ms, because Claude
 Code hooks pay that cost on every event). A singleton mutex makes a second UI launch
 activate the first instead of starting a rival. Two independent producers feed the deck:
@@ -22,10 +22,10 @@ internal: a **transcript scanner** on a 10-second timer, which is the only thing
 tool call finish.
 
 ```
-Claude Code hooks ─> sessiondeck-hook.ps1 ─> SessionDeck.exe session status ...
+Claude Code hooks ─> tabtower-hook.ps1 ─> TabTower.exe session status ...
                                                       │  (pipe, one line, closes)
                                                       ▼
-                                            SessionDeck (WPF, single instance)
+                                            TabTower (WPF, single instance)
                                                       ▲  (pipe, stays open both ways)
 VSCode extension ─────────────────────────────────────┘
                                                       │
@@ -124,7 +124,7 @@ the tab count did not grow (a count that grew means the reveal RESUMED the sessi
 which is closed again at once), and if the active tab did not move, its label must agree.
 `newSession` with `AfterSessionId` / `NoFocus` (0.6.14) reveals a live anchor session's tab first so
 VSCode places the new tab beside it, then hands the window's previously active tab back.
-`hooks/sessiondeck-hook.ps1` translates each hook event into one CLI call, swallows every
+`hooks/tabtower-hook.ps1` translates each hook event into one CLI call, swallows every
 failure, and must stay PowerShell 5.1 compatible and UTF-8 **with BOM**.
 
 ## Two mechanisms worth understanding before you touch them
@@ -191,9 +191,9 @@ still does), then a lone window in the instance — skipping windows another car
 
 | Path | Contents |
 |---|---|
-| `%APPDATA%\SessionDeck\config.json` | Everything persistent. Hand-editable; unknown keys are filled from defaults on load. |
-| `%APPDATA%\SessionDeck\logs` | The diagnostic log. `sessiondeck log --debug on` raises the level and persists it. |
-| `%APPDATA%\SessionDeck\toggles\<id>` | One file per user toggle, `1` or `0`, for external processes. |
+| `%APPDATA%\TabTower\config.json` | Everything persistent. Hand-editable; unknown keys are filled from defaults on load. |
+| `%APPDATA%\TabTower\logs` | The diagnostic log. `tabtower log --debug on` raises the level and persists it. |
+| `%APPDATA%\TabTower\toggles\<id>` | One file per user toggle, `1` or `0`, for external processes. |
 | `~\.claude\projects\<slug>\*.jsonl` | Claude Code's transcripts. Read-only to us, and the slug is derived in `DefaultTranscriptDir`. |
 | `<workspace>\.vscode\settings.json` | Read for the card colour only. Never written. |
 

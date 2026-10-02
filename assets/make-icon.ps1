@@ -1,15 +1,15 @@
-# Generates SessionDeck.ico — the app icon: a dark deck with a 2x2 grid of workspace
+# Generates TabTower.ico — the app icon: a dark deck with a 2x2 grid of workspace
 # cards, each carrying a status dot (blue/orange/green/gray = working/waiting/done/idle);
 # the first card has the accent-blue border (the "active" card).
 # Outputs:
-#   assets\SessionDeck.ico                    — 256/64/48/32/16 px PNG-compressed entries
+#   assets\TabTower.ico                    — 256/64/48/32/16 px PNG-compressed entries
 #   vscode-extension\assets\logo128.png       — the Connector's Marketplace icon (VSCode wants 128x128)
 # Both come from the same Draw-Icon, so the app and the extension can never drift apart.
 # PowerShell 5.1 compatible. Re-run after tweaking to regenerate both.
 
 Add-Type -AssemblyName System.Drawing
 
-$outPath = Join-Path $PSScriptRoot 'SessionDeck.ico'
+$outPath = Join-Path $PSScriptRoot 'TabTower.ico'
 $sizes = 256, 64, 48, 32, 16
 
 function New-RoundedRectPath([double]$x, [double]$y, [double]$w, [double]$h, [double]$r) {

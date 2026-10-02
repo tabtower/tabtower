@@ -1,10 +1,10 @@
-// SessionDeck Connector (SPEC stage D).
+// TabTower Connector (SPEC stage D).
 //
-// Outbound: keeps a persistent connection to SessionDeck's named pipe and pushes a
+// Outbound: keeps a persistent connection to TabTower's named pipe and pushes a
 // "vscode-sync" snapshot (workspace folder, git branch, open Claude Code tabs) on
 // activation and on every tab/branch change.
 //
-// Inbound: SessionDeck pushes commands down the same connection. "openSession"
+// Inbound: TabTower pushes commands down the same connection. "openSession"
 // delegates to Claude Code's own claude-vscode.editor.open, which reveals the tab
 // if the session is open and resumes it if not — the extension holds the
 // session_id↔tab map, so no correlation is needed on our side. "closeSession" (v0.6.12,
@@ -23,14 +23,14 @@ import * as net from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const PIPE_PATH = '\\\\.\\pipe\\sessiondeck';
+const PIPE_PATH = '\\\\.\\pipe\\tabtower';
 const RECONNECT_MS = 5000;
 const SYNC_DEBOUNCE_MS = 300;
-const HEARTBEAT_MS = 2000;         // must stay well under SessionDeck's ActiveTabTtl
+const HEARTBEAT_MS = 2000;         // must stay well under TabTower's ActiveTabTtl
 const CLAUDE_VIEWTYPE = 'claudeVSCodePanel';   // actual viewType is prefixed (mainThreadWebview-...)
-const RELEASES_URL = 'https://github.com/eyalBPM/SessionDeck/releases/latest';
+const RELEASES_URL = 'https://github.com/tabtower/tabtower/releases/latest';
 const APP_MISSING_GRACE_MS = 20000;
-const APP_MISSING_DISMISSED = 'sessiondeck.appMissingNoticeDismissed';
+const APP_MISSING_DISMISSED = 'tabtower.appMissingNoticeDismissed';
 
 let out: vscode.OutputChannel;
 let extensionVersion = '?';
@@ -62,7 +62,7 @@ function workspacePath(): string {
 function claudeTabs(): { Label: string; Active: boolean }[] {
     const tabs: { Label: string; Active: boolean }[] = [];
     // isActive is per-group: with split editor groups EVERY group has an active tab, and
-    // SessionDeck auto-acknowledges the first Active it sees. Only the focused group's
+    // TabTower auto-acknowledges the first Active it sees. Only the focused group's
     // active tab is what the user is actually looking at (issue 2026-07-20).
     const activeGroup = vscode.window.tabGroups.activeTabGroup;
     for (const group of vscode.window.tabGroups.all) {
@@ -115,7 +115,7 @@ function queueSync(): void {
     syncTimer = setTimeout(sendSync, SYNC_DEBOUNCE_MS);
 }
 
-/// The event-driven syncs above are the only thing telling SessionDeck which tab the user
+/// The event-driven syncs above are the only thing telling TabTower which tab the user
 /// is looking at, and that answer is what suppresses a session's blink. One dropped sync
 /// (pipe down, reconnect window, a second VSCode window on the same workspace racing us)
 /// therefore leaves the deck acting on a stale answer forever — it silences a blink the
@@ -202,7 +202,7 @@ function resumeInTerminal(sessionId: string): void {
     } catch (e) {
         out.appendLine(`terminal resume failed: ${e}`);
         void vscode.window.showErrorMessage(
-            'SessionDeck: could not open a terminal to resume the session. Details: Output → SessionDeck.');
+            'TabTower: could not open a terminal to resume the session. Details: Output → TabTower.');
     }
 }
 
@@ -212,7 +212,7 @@ function resumeInTerminal(sessionId: string): void {
 ///
 /// Placement: VSCode opens a new editor to the right of the ACTIVE one (the default
 /// `workbench.editor.openPositioning`), so the anchor session's tab is revealed first. The anchor
-/// is the LIVE caller — SessionDeck passes it only for a session that is alive and has a tab in
+/// is the LIVE caller — TabTower passes it only for a session that is alive and has a tab in
 /// this window, because revealing a dead session revives it (see closeClaudeTab).
 ///
 /// Focus: the deck already leaves the OS window alone (--no-focus). Inside the window, creating
@@ -292,7 +292,7 @@ function sameInput(a: unknown, b: unknown): boolean {
 }
 
 /// VSCode truncates a long tab label with a trailing '…', so a truncated label matches any
-/// title it prefixes — the same rule SessionDeck's own correlation uses (TabLabelMatches).
+/// title it prefixes — the same rule TabTower's own correlation uses (TabLabelMatches).
 function labelMatches(label: string, titles: string[]): boolean {
     for (const t of titles) {
         if (label === t) {
@@ -309,7 +309,7 @@ function isClaudeTab(tab: vscode.Tab | undefined): boolean {
     return !!tab && tab.input instanceof vscode.TabInputWebview && tab.input.viewType.includes(CLAUDE_VIEWTYPE);
 }
 
-/// Close the tab of a session that no longer exists (SessionDeck marks it `replaced`: a
+/// Close the tab of a session that no longer exists (TabTower marks it `replaced`: a
 /// relay script killed its process after opening its successor). Nothing in the tab
 /// API says which session a tab holds, so the tab is found by LABEL, and closed only when
 /// exactly one Claude tab carries one of the session's labels.
@@ -378,7 +378,7 @@ function activeTabPosition(): TabPosition | undefined {
 }
 
 /// Close the tab of a session by SESSION ID, for a caller that knows the session is ALIVE
-/// (SessionDeck's `session close-tab` / `session end --close-tab`, i.e. an explicit request,
+/// (TabTower's `session close-tab` / `session end --close-tab`, i.e. an explicit request,
 /// not the orphan sweep).
 ///
 /// WHY IT CANNOT BE DONE BY LABEL. The tab API hands over a label and a webview viewType and
@@ -531,12 +531,12 @@ async function openClaudePanel(sessionId: string | undefined, maximize: boolean,
                 setTimeout(() => term.sendText(prompt, false), 3000);
             }
             void vscode.window.showWarningMessage(
-                'SessionDeck: opening the session through Claude Code failed — its internal API may have changed in an update. ' +
-                'Fell back to the terminal. Details: Output → SessionDeck.');
+                'TabTower: opening the session through Claude Code failed — its internal API may have changed in an update. ' +
+                'Fell back to the terminal. Details: Output → TabTower.');
         } catch (e2) {
             out.appendLine(`terminal fallback failed too: ${e2}`);
             void vscode.window.showErrorMessage(
-                'SessionDeck: opening the session failed completely (the terminal fallback failed too). Details: Output → SessionDeck.');
+                'TabTower: opening the session failed completely (the terminal fallback failed too). Details: Output → TabTower.');
         }
     }
 }
@@ -548,7 +548,7 @@ function connect(): void {
 
     s.on('connect', () => {
         connected = true;
-        out.appendLine('connected to SessionDeck');
+        out.appendLine('connected to TabTower');
         sendSync();
     });
     s.on('data', (chunk) => {
@@ -567,7 +567,7 @@ function connect(): void {
             return;                      // stale socket ('close' after 'error', or replaced)
         }
         if (connected) {
-            out.appendLine('disconnected from SessionDeck — retrying');
+            out.appendLine('disconnected from TabTower — retrying');
         }
         connected = false;
         socket = undefined;
@@ -589,7 +589,7 @@ function connect(): void {
 /// whenever the app simply isn't running, which happens many times a day and is not
 /// a problem — warning on that would be a false alarm on every reboot. So the notice
 /// is gated on the app never having run on this machine at all: the app writes
-/// %APPDATA%\SessionDeck\config.json on first launch (ConfigStore.ConfigPath), and
+/// %APPDATA%\TabTower\config.json on first launch (ConfigStore.ConfigPath), and
 /// that file surviving in AppData is the evidence. Present → silent forever.
 function appEverRan(): boolean {
     const appData = process.env.APPDATA;
@@ -597,7 +597,7 @@ function appEverRan(): boolean {
         return true;                     // can't tell → assume it did, never guess a warning
     }
     try {
-        return fs.existsSync(path.join(appData, 'SessionDeck', 'config.json'));
+        return fs.existsSync(path.join(appData, 'TabTower', 'config.json'));
     } catch {
         return true;
     }
@@ -614,15 +614,15 @@ function watchForMissingApp(context: vscode.ExtensionContext): void {
         if (connected || appEverRan() || context.globalState.get<boolean>(APP_MISSING_DISMISSED)) {
             return;
         }
-        out.appendLine('no SessionDeck app found on this machine — showing the one-time notice');
+        out.appendLine('no TabTower app found on this machine — showing the one-time notice');
         // Marked before the dialog is answered, not after: the notification is modeless, so
         // waiting for a click would leave the window open for a sibling to stack a duplicate.
         await context.globalState.update(APP_MISSING_DISMISSED, true);
         const pick = await vscode.window.showWarningMessage(
-            'SessionDeck Connector on its own does nothing: it is the companion to the SessionDeck ' +
+            'TabTower Connector on its own does nothing: it is the companion to the TabTower ' +
             'app for Windows, which is not installed on this machine.',
-            'Get SessionDeck', 'Dismiss');
-        if (pick === 'Get SessionDeck') {
+            'Get TabTower', 'Dismiss');
+        if (pick === 'Get TabTower') {
             void vscode.env.openExternal(vscode.Uri.parse(RELEASES_URL));
         }
     }, APP_MISSING_GRACE_MS);
@@ -656,17 +656,17 @@ async function initGit(context: vscode.ExtensionContext): Promise<void> {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-    out = vscode.window.createOutputChannel('SessionDeck');
+    out = vscode.window.createOutputChannel('TabTower');
     context.subscriptions.push(out);
     extensionVersion = context.extension.packageJSON.version ?? '?';
     out.appendLine(banner(extensionVersion));
-    out.appendLine(`SessionDeck Connector activated for: ${workspacePath() || '(no folder)'}`);
+    out.appendLine(`TabTower Connector activated for: ${workspacePath() || '(no folder)'}`);
 
     context.subscriptions.push(vscode.window.tabGroups.onDidChangeTabs(queueSync));
     context.subscriptions.push(vscode.window.tabGroups.onDidChangeTabGroups(queueSync));
     context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(queueSync));
     context.subscriptions.push(vscode.window.onDidChangeWindowState(queueSync));
-    context.subscriptions.push(vscode.commands.registerCommand('sessiondeck.sync', () => {
+    context.subscriptions.push(vscode.commands.registerCommand('tabtower.sync', () => {
         out.appendLine('manual sync');
         sendSync();
     }));

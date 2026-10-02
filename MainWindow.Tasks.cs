@@ -3,11 +3,11 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using SessionDeck.Models;
-using SessionDeck.Services;
-using SessionDeck.ViewModels;
+using TabTower.Models;
+using TabTower.Services;
+using TabTower.ViewModels;
 
-namespace SessionDeck;
+namespace TabTower;
 
 /// <summary>
 /// Tasks-panel feature: the external tasks file, its watcher, the tasks page

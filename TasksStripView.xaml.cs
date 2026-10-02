@@ -1,9 +1,9 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using SessionDeck.ViewModels;
+using TabTower.ViewModels;
 
-namespace SessionDeck;
+namespace TabTower;
 
 /// <summary>The collapsed tasks strip; actions delegate to MainWindow.</summary>
 public partial class TasksStripView : UserControl

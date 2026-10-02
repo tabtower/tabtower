@@ -1,9 +1,9 @@
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using System.Windows.Media;
-using SessionDeck.Interop;
+using TabTower.Interop;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 /// <summary>
 /// Pushes "needs attention" out of the window and into the OS (feature 2026-07-20).

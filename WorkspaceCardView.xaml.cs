@@ -5,10 +5,10 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
-using SessionDeck.Interop;
-using SessionDeck.ViewModels;
+using TabTower.Interop;
+using TabTower.ViewModels;
 
-namespace SessionDeck;
+namespace TabTower;
 
 /// <summary>
 /// One workspace card: chrome (Peacock-colored border, header, session cards) drawn by WPF;

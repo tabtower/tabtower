@@ -2,7 +2,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 /// <summary>One card badge, as an external producer described it.</summary>
 /// <param name="Text">What the pill says. May carry <c>{until:ISO-8601}</c> tokens, drawn as a

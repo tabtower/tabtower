@@ -1,6 +1,6 @@
 ﻿using System.IO;
 
-namespace SessionDeck.Models;
+namespace TabTower.Models;
 
 // Order matters: ZoneModeCombo items are mapped by index cast (persistence is by name).
 // There is deliberately no full-screen zone: reserving a whole monitor leaves it with no work
@@ -317,9 +317,9 @@ public class SessionGroupConfig
     public List<string> Aliases { get; set; } = new();
 }
 
-/// <summary>A user-defined toolbar toggle (feature 2026-07-19). SessionDeck knows nothing
+/// <summary>A user-defined toolbar toggle (feature 2026-07-19). TabTower knows nothing
 /// about what a toggle controls — it only owns the flag: the current state is written to
-/// %APPDATA%\SessionDeck\toggles\&lt;id&gt; as "1"/"0" for any external process to read.
+/// %APPDATA%\TabTower\toggles\&lt;id&gt; as "1"/"0" for any external process to read.
 /// No toggles defined = no UI.</summary>
 public class CustomToggleConfig
 {
@@ -481,7 +481,7 @@ public class AppConfig
     };
 
     /// <summary>Debug-level logging (full sync snapshots). Persisted so a hunt for a
-    /// sporadic bug survives an app restart; toggled via `sessiondeck log --debug`.</summary>
+    /// sporadic bug survives an app restart; toggled via `tabtower log --debug`.</summary>
     public bool DebugLogging { get; set; }
 
     /// <summary>External tasks file. null/empty = the tasks feature is fully off:

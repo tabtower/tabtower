@@ -1,8 +1,8 @@
-﻿<UserControl x:Class="SessionDeck.WorkspaceCardView"
+﻿<UserControl x:Class="TabTower.WorkspaceCardView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:SessionDeck"
-             xmlns:services="clr-namespace:SessionDeck.Services">
+             xmlns:local="clr-namespace:TabTower"
+             xmlns:services="clr-namespace:TabTower.Services">
     <UserControl.Resources>
         <!-- Hebrew-leading text renders RTL + right-aligned (issue 2026-07-19). Titles,
              descriptions and tab names come from outside the app, so they stay

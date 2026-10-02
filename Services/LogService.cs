@@ -1,10 +1,10 @@
 using System.IO;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 /// <summary>
 /// Minimal file logger (design 2026-07-22): one line per event, daily file under
-/// %APPDATA%\SessionDeck\logs, no external dependencies.
+/// %APPDATA%\TabTower\logs, no external dependencies.
 ///
 /// Two levels. Info records state CHANGES and decisions — hook status updates, every
 /// auto-acknowledge with its cause, connector lifecycle, unroutable syncs. Always on:
@@ -12,7 +12,7 @@ namespace SessionDeck.Services;
 /// reproducible on demand, so a dev-only log would miss exactly the events that matter;
 /// being event-driven the volume is negligible. Debug records the periodic INPUTS
 /// (full sync snapshots, every 2s while VSCode is focused) — off by default, toggled at
-/// runtime via `sessiondeck log --debug on|off`, persisted in config.
+/// runtime via `tabtower log --debug on|off`, persisted in config.
 ///
 /// Retention: files older than <see cref="RetentionDays"/> are deleted at startup; a
 /// runaway day stops at <see cref="MaxFileBytes"/> (one "truncated" marker, then silence

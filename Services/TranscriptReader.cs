@@ -2,7 +2,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 /// <summary>Titles derived from a Claude Code transcript (.jsonl).</summary>
 /// <param name="TabTitle">The exact label VSCode shows on the session's tab: the last

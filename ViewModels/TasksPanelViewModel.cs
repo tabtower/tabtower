@@ -1,10 +1,10 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using SessionDeck.Models;
-using SessionDeck.Services;
+using TabTower.Models;
+using TabTower.Services;
 
-namespace SessionDeck.ViewModels;
+namespace TabTower.ViewModels;
 
 /// <summary>
 /// State of the tasks feature: the parsed task list (pinned first, then file

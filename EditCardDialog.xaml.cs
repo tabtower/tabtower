@@ -1,10 +1,10 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using SessionDeck.Services;
-using SessionDeck.ViewModels;
+using TabTower.Services;
+using TabTower.ViewModels;
 
-namespace SessionDeck;
+namespace TabTower;
 
 /// <summary>
 /// Card editing (decision 17 in CLAUDE.md — custom title/description on both card levels).

@@ -1,9 +1,9 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using SessionDeck.Models;
+using TabTower.Models;
 
-namespace SessionDeck.ViewModels;
+namespace TabTower.ViewModels;
 
 public sealed class MainViewModel : INotifyPropertyChanged
 {

@@ -1,10 +1,10 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
-using SessionDeck.Models;
-using SessionDeck.Services;
+using TabTower.Models;
+using TabTower.Services;
 
-namespace SessionDeck.ViewModels;
+namespace TabTower.ViewModels;
 
 /// <summary>
 /// One square of the tasks page's navigation grid. The grid is the map the

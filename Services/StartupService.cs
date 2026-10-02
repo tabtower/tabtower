@@ -1,6 +1,6 @@
 using Microsoft.Win32;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 /// <summary>
 /// Start with Windows: per-user Run key, no admin. Full state is then
@@ -9,17 +9,23 @@ namespace SessionDeck.Services;
 public static class StartupService
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string ValueName = "SessionDeck";
+    private const string ValueName = "TabTower";
 
-    /// <summary>One-time migration from the pre-rename "WinGrid" Run value (decision 19):
-    /// if the old value exists, replace it with a "SessionDeck" value pointing at the current exe.</summary>
+    /// <summary>One-time migration from the Run values of the app's former names ("WinGrid",
+    /// then the one in <see cref="LegacyName.Product"/>): if one exists, replace it with a
+    /// "TabTower" value pointing at the current exe. Start-with-Windows stays on exactly when
+    /// it was on before, and the old build stops being launched at sign-in.</summary>
     public static void MigrateLegacyValue()
     {
         using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath);
-        if (key.GetValue("WinGrid") == null)
-            return;
-        key.DeleteValue("WinGrid", throwOnMissingValue: false);
-        if (Environment.ProcessPath is { } exe)
+        bool wasEnabled = false;
+        foreach (string legacy in new[] { "WinGrid", LegacyName.Product })
+        {
+            if (key.GetValue(legacy) == null) continue;
+            key.DeleteValue(legacy, throwOnMissingValue: false);
+            wasEnabled = true;
+        }
+        if (wasEnabled && Environment.ProcessPath is { } exe)
             key.SetValue(ValueName, $"\"{exe}\"");
     }
 

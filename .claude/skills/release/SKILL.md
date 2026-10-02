@@ -1,12 +1,12 @@
 ---
 name: release
-description: Cut and publish a SessionDeck release — the single-release policy, CHANGELOG.md, what release.ps1 guards and does, and how to recover when it blocks. Trigger when asked to release, publish, ship, cut a version, tag a version, or when a release run fails.
+description: Cut and publish a TabTower release — the single-release policy, CHANGELOG.md, what release.ps1 guards and does, and how to recover when it blocks. Trigger when asked to release, publish, ship, cut a version, tag a version, or when a release run fails.
 ---
 
-# Releasing SessionDeck
+# Releasing TabTower
 
 `release.ps1` takes committed code to a published GitHub release in one command. The
-`<Version>` in `SessionDeck.csproj` is the **single source of truth** — the script derives
+`<Version>` in `TabTower.csproj` is the **single source of truth** — the script derives
 the tag, the zip name and the release title from it.
 
 ```powershell
@@ -70,7 +70,7 @@ starts fresh for the same reason.
 ## What a full run does, in order
 
 1. Preflight guards (above).
-2. Syncs the `# Version:` header in `hooks/sessiondeck-hook.ps1` from the csproj, and
+2. Syncs the `# Version:` header in `hooks/tabtower-hook.ps1` from the csproj, and
    commits that sync if it changed anything.
 3. `dotnet publish -c Release -r win-x64 --self-contained` into a freshly deleted publish
    directory. **Self-contained but not single-file, deliberately**. See Notes.
@@ -81,7 +81,7 @@ starts fresh for the same reason.
    otherwise it reuses the existing one. The vsix is never committed — it is a release
    artifact (`.gitignore`).
 7. Zips the publish output (including `hooks\`) plus the vsix, `install.ps1` and
-   `uninstall.ps1` into `SessionDeck-<version>-win-x64.zip`.
+   `uninstall.ps1` into `TabTower-<version>-win-x64.zip`.
 8. Writes the notes, then prepends the same commit list to `CHANGELOG.md` and commits it.
 9. Pushes `main`, deletes **every** existing release (tags untouched), and runs
    `gh release create … --latest`.
@@ -94,11 +94,11 @@ starts fresh for the same reason.
   all three at the end of an install so a mismatch is visible rather than mysterious.
 - Packaging is deliberately self-contained (~150MB): it must work on a machine with no
   .NET installed. It is just as deliberately **not** `PublishSingleFile`. Bundling the
-  runtime made a 140MB `SessionDeck.exe`, and since `install.ps1` rewrote it whole every
+  runtime made a 140MB `TabTower.exe`, and since `install.ps1` rewrote it whole every
   time, each install stalled the machine for about a minute: `explorer.exe` burned a core
   on 200,000+ soft page faults per second, measured across eight installs. Spread over
   ~200 files, an upgrade rewrites only what changed, usually
-  `SessionDeck.dll` alone, because `install.ps1` compares content hashes before writing.
+  `TabTower.dll` alone, because `install.ps1` compares content hashes before writing.
   If single-file is ever restored, that installer optimisation dies with it.
 - There is no auto-update and no update notification. That is a conscious choice for a
   tool used by a handful of people — telling people about a new release is manual.

@@ -1,6 +1,6 @@
 ---
 name: manual-verify
-description: The manual verification checklist for SessionDeck — the behaviour automation can't reach (live thumbnails, hook-driven statuses, blink and auto-acknowledge, the Reserved Zone, notifications, the tasks panel). Trigger before a release, after touching status/blink/zone/notification code, or when asked to verify or smoke-test the app.
+description: The manual verification checklist for TabTower — the behaviour automation can't reach (live thumbnails, hook-driven statuses, blink and auto-acknowledge, the Reserved Zone, notifications, the tasks panel). Trigger before a release, after touching status/blink/zone/notification code, or when asked to verify or smoke-test the app.
 ---
 
 # Manual verification
@@ -9,16 +9,16 @@ The 38 automated tests cover the `install-hooks` merge and nothing else. Everyth
 needs a human looking at the screen. Run the sections that the change actually touches;
 run all of them before a release.
 
-**Running it:** `bin\Debug\net10.0-windows\SessionDeck.exe` (or F5 from Visual Studio).
+**Running it:** `bin\Debug\net10.0-windows\TabTower.exe` (or F5 from Visual Studio).
 Remember the deploy order — `quit`, build, start (see `CLAUDE.md`).
-**CLI:** `SessionDeck.exe <command>` from that folder; `help` lists everything.
-**Config:** `%APPDATA%\SessionDeck\config.json`. **Log:** `%APPDATA%\SessionDeck\logs`.
+**CLI:** `TabTower.exe <command>` from that folder; `help` lists everything.
+**Config:** `%APPDATA%\TabTower\config.json`. **Log:** `%APPDATA%\TabTower\logs`.
 
 ## 1. Workspace cards — adding and binding
 
 - [ ] "+ Add workspace" → pick a folder → a card named after the folder.
 - [ ] A VSCode window already open on that workspace binds immediately (live thumbnail).
-- [ ] `SessionDeck.exe add "D:\path"` — same behaviour from the CLI.
+- [ ] `TabTower.exe add "D:\path"` — same behaviour from the CLI.
 - [ ] Adding the same folder twice is blocked with a message.
 - [ ] A git project shows its branch (⎇); switching branch updates within ~10s (instantly with the extension).
 - [ ] A Peacock project (`.vscode/settings.json`) takes the Peacock colour on border and title.
@@ -56,7 +56,7 @@ Install the hooks per `hooks/README.md`, then open a Claude Code session:
 - [ ] Custom zone: "Custom left…" opens the size dialog; `2/7` ≈ 28.6%, `40%` and `0.4` work, invalid input disables OK, Cancel restores the previous choice, clicking the active item reopens the dialog, and the size survives a restart.
 - [ ] The zone dropdown has **no full-screen entry**, and `100%` / `1.0` / `1/1` in the size dialog is rejected (OK stays disabled). 90% is the widest accepted. Why: a zone that leaves its monitor no work area pins explorer.exe at 100–430% of a core.
 - [ ] **Whole-monitor deck** (what replaced the full-screen zone): zone off + maximize + 📌 on, then restart — it comes back maximized and pinned on the same monitor.
-- [ ] **The shell stays quiet while zoned.** Sample `explorer.exe` once a second (`Win32_PerfRawData_PerfProc_Process`, diff `PageFaultsPersec` with the UInt32 wrap) through off / half / quarter / custom-90%: under 10,000 faults/sec and 20% of a core throughout. Measuring SessionDeck itself proves nothing — it stays at 1–3% while the shell burns.
+- [ ] **The shell stays quiet while zoned.** Sample `explorer.exe` once a second (`Win32_PerfRawData_PerfProc_Process`, diff `PageFaultsPersec` with the UInt32 wrap) through off / half / quarter / custom-90%: under 10,000 faults/sec and 20% of a core throughout. Measuring TabTower itself proves nothing — it stays at 1–3% while the shell burns.
 - [ ] Zone lock: while active, no title-bar drag, no frame resize (the cursor doesn't change), no double-click maximize, no Win+Shift+Arrow. Minimize/restore work and return exactly to the zone. Turning the zone off restores normal drag/resize.
 - [ ] Stage: monitor + full/half affect where ▶ lands (Stage full-screen is unrelated to the zone and still exists).
 
@@ -64,14 +64,14 @@ Install the hooks per `hooks/README.md`, then open a Claude Code session:
 
 - [ ] Close and reopen — workspaces, sessions (closed ones too), statuses and acknowledgements all return.
 - [ ] `config.json` is readable; a `StatusStyles` colour change is picked up after a restart.
-- [ ] "Start with Windows" creates/removes `HKCU\...\Run\SessionDeck`.
+- [ ] "Start with Windows" creates/removes `HKCU\...\Run\TabTower`.
 - [ ] After installing to a new folder, the Run value points at the new exe.
-- [ ] `sessiondeck quit` closes cleanly **and the work area returns to full size** — check with an active zone by maximizing a window afterwards.
+- [ ] `tabtower quit` closes cleanly **and the work area returns to full size** — check with an active zone by maximizing a window afterwards.
 
-## 6. The VSCode extension (SessionDeck Connector)
+## 6. The VSCode extension (TabTower Connector)
 
 Prerequisite: the VSIX is installed and **every VSCode window has been reloaded**
-(Ctrl+Shift+P → "Developer: Reload Window"). Log: Output → the "SessionDeck" channel.
+(Ctrl+Shift+P → "Developer: Reload Window"). Log: Output → the "TabTower" channel.
 
 - [ ] A 📑 chip shows the open Claude tab count (tooltip lists their names); opening/closing a tab updates it within ~1s.
 - [ ] Clicking a session card with its tab open → focus + the tab is revealed.
@@ -81,7 +81,7 @@ Prerequisite: the VSIX is installed and **every VSCode window has been reloaded*
 - [ ] Clicking a session while VSCode is fully closed → VSCode launches and the tab opens by itself within seconds (a pending open).
 - [ ] Sessions show a real name within ~10s: the tab title primary, the session title secondary when they differ.
 - [ ] `session open --id <sid>` behaves the same from the CLI.
-- [ ] Restarting SessionDeck → the extension reconnects on its own within ~5s ("connected" in the log).
+- [ ] Restarting TabTower → the extension reconnects on its own within ~5s ("connected" in the log).
 - [ ] An old session that can't be resumed shows a status-bar message instead of opening an empty tab.
 - [ ] Long titles wrap rather than truncate; hovering a session card lightens its background.
 
@@ -91,16 +91,16 @@ The case that needs a human: two tabs carrying the SAME label. The by-label clos
 one of those by design, so this is the only path that reaches it.
 
 ```powershell
-SessionDeck.exe session new <workspace id> --no-focus     # twice: two untitled sessions
-SessionDeck.exe list                                      # read the two new ids
-SessionDeck.exe session close-tab --id <the first id>
+TabTower.exe session new <workspace id> --no-focus     # twice: two untitled sessions
+TabTower.exe list                                      # read the two new ids
+TabTower.exe session close-tab --id <the first id>
 ```
 
 - [ ] Both new tabs read "Claude Code" (an unprompted session keeps the label VSCode gave it).
 - [ ] **The right tab closes** — the one whose id was named, not the other, not the active one.
 - [ ] **The second tab stays open and alive**: clicking its card reveals it, nothing was resumed.
 - [ ] The window's previously active tab is active again afterwards.
-- [ ] Output → "SessionDeck" logs `closeSession <id> by id` then `closed "Claude Code"`.
+- [ ] Output → "TabTower" logs `closeSession <id> by id` then `closed "Claude Code"`.
 - [ ] Repeat with the target's OWN tab active first: it still closes, and the log shows the
       extra step onto a neighbouring tab that makes the reveal observable.
 - [ ] `session close-tab --id` of a session whose tab was already closed by hand: the log says
@@ -185,5 +185,5 @@ Hebrew and must follow its own language:
 - `claude-vscode.editor.open` is an internal Claude Code command; if it disappears the
   extension falls back to a terminal with `claude --resume`.
 
-*`SessionDeck.exe snapshot <path>.png` renders the UI to a PNG (without thumbnails) —
+*`TabTower.exe snapshot <path>.png` renders the UI to a PNG (without thumbnails) —
 useful for remote debugging.*

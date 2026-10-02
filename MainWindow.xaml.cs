@@ -4,13 +4,13 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Threading;
-using SessionDeck.Cli;
-using SessionDeck.Interop;
-using SessionDeck.Models;
-using SessionDeck.Services;
-using SessionDeck.ViewModels;
+using TabTower.Cli;
+using TabTower.Interop;
+using TabTower.Models;
+using TabTower.Services;
+using TabTower.ViewModels;
 
-namespace SessionDeck;
+namespace TabTower;
 
 /// <summary>
 /// Main controller: owns the view-model, services, workspace/session engine,
@@ -900,7 +900,7 @@ public partial class MainWindow : Window
            || !string.IsNullOrEmpty(s.TabTitle) || !string.IsNullOrEmpty(s.AutoTitle);
 
     /// <summary>Reconcile every card against what VSCode actually has open, right now, and
-    /// close what no longer exists. The ↻ button and `sessiondeck reconcile` both land here.
+    /// close what no longer exists. The ↻ button and `tabtower reconcile` both land here.
     ///
     /// It exists because the automatic sweep is deliberately slow, and the situation that
     /// produces the most junk is one the user can see coming: switching an instance to a
@@ -942,7 +942,7 @@ public partial class MainWindow : Window
     /// Both are invisible to the phantom sweep (status isn't idle, the transcript exists).
     /// The close waits out OrphanSessionTtl on both the condition and total silence.
     ///
-    /// <paramref name="force"/> is the ↻ button and `sessiondeck reconcile`: the user is
+    /// <paramref name="force"/> is the ↻ button and `tabtower reconcile`: the user is
     /// looking at the deck saying it is wrong NOW, so the two shapes that carry evidence stop
     /// waiting. Returns how many sessions were closed, which is what the button reports.</summary>
     private int RefreshOrphanSessions(bool force = false)
@@ -994,7 +994,7 @@ public partial class MainWindow : Window
                 //
                 // Measured 12-09-2026 at 20:28:53, twenty-four seconds after a deck restart: the
                 // orange instance had not finished reconnecting while purple, green and the
-                // SessionDeck window had, so a manual ↻ swept the union of three windows and
+                // TabTower window had, so a manual ↻ swept the union of three windows and
                 // closed SEVEN live orange cards in forty milliseconds: the whole orange group
                 // vanished. The same shape as 05-09, where the green instance going
                 // down took seven sessions with it — the lesson was recorded then and the sweep
@@ -1424,7 +1424,7 @@ public partial class MainWindow : Window
     private const int HistoricalSessionLimit = 15;
 
     /// <summary>Expanded view lists past sessions straight from the workspace's Claude Code
-    /// transcripts folder — including ones SessionDeck never witnessed. Not persisted.</summary>
+    /// transcripts folder — including ones TabTower never witnessed. Not persisted.</summary>
     public void DiscoverHistoricalSessions(WorkspaceViewModel ws)
     {
         string? dir = ws.TranscriptDir ?? DefaultTranscriptDir(ws.Path);
@@ -3401,7 +3401,7 @@ public partial class MainWindow : Window
 
     public IReadOnlyList<SessionGroupConfig> SessionGroups => _sessionGroups;
 
-    /// <summary>Where a group stands right now, for `sessiondeck groups`: is its instance
+    /// <summary>Where a group stands right now, for `tabtower groups`: is its instance
     /// running, and is its connector up. Three states, because they need three answers — a
     /// session aimed at a group that is merely slow to connect is parked, one aimed at a group
     /// that is not running gets it launched.
@@ -3798,7 +3798,7 @@ public partial class MainWindow : Window
         if (conn == null) return (false, "no VSCode connector for this workspace");
         if (!conn.SupportsCloseSession)
         {
-            string why = $"the VSCode window's SessionDeck extension ({(conn.Version.Length > 0 ? conn.Version : "pre-0.6.12")}) cannot close tabs — reload that window to update it, or close the tab by hand";
+            string why = $"the VSCode window's TabTower extension ({(conn.Version.Length > 0 ? conn.Version : "pre-0.6.12")}) cannot close tabs — reload that window to update it, or close the tab by hand";
             if (session.CloseTabAttempts == 1)
                 LogService.Info("close", $"session={session.SessionId} closeSession NOT sent to pid={conn.Pid}: {why}");
             return (false, why);
@@ -3824,7 +3824,7 @@ public partial class MainWindow : Window
         return labels;
     }
 
-    /// <summary>`sessiondeck session close-tab --id` (and `session end --close-tab`): close a LIVE
+    /// <summary>`tabtower session close-tab --id` (and `session end --close-tab`): close a LIVE
     /// session's VSCode tab, identified by its session id rather than by its label.
     ///
     /// The one thing it does that RequestCloseReplacedTab cannot: a session that was opened by a
@@ -3855,7 +3855,7 @@ public partial class MainWindow : Window
         var conn = FindConnector(ws, session);
         if (conn == null) return (false, "no VSCode connector for this workspace");
         if (!conn.SupportsCloseSessionById)
-            return (false, $"the VSCode window's SessionDeck extension ({(conn.Version.Length > 0 ? conn.Version : "pre-0.6.12")}) cannot close a tab by session id — reload that window to update it");
+            return (false, $"the VSCode window's TabTower extension ({(conn.Version.Length > 0 ? conn.Version : "pre-0.6.12")}) cannot close a tab by session id — reload that window to update it");
         var labels = TabLabelsOf(session);
         if (!conn.TrySend(new { Cmd = "closeSession", SessionId = sessionId, Labels = labels, ById = true }))
         {
@@ -4099,7 +4099,7 @@ public partial class MainWindow : Window
 
         var fresh = attention.Where(p => _notifiedSessions.Add(p.S.SessionId)).ToList();
         if (fresh.Count == 0) return;
-        _notifier.Balloon("SessionDeck", AttentionText(fresh));
+        _notifier.Balloon("TabTower", AttentionText(fresh));
         _notifier.Flash();
     }
 
@@ -4202,7 +4202,7 @@ public partial class MainWindow : Window
         StageModeCombo.Items.Clear();
         foreach (var name in new[] { "Full screen", "Left half", "Right half", "Rect (CLI)" }) StageModeCombo.Items.Add(name);
         StartupMenuItem.IsChecked = StartupService.IsEnabled();
-        VersionMenuItem.Header = $"SessionDeck v{GetType().Assembly.GetName().Version?.ToString(3)}";
+        VersionMenuItem.Header = $"TabTower v{GetType().Assembly.GetName().Version?.ToString(3)}";
         MaximizeSessionMenuItem.IsChecked = Vm.OpenSessionMaximized;
         NotificationsMenuItem.IsChecked = Vm.WindowsNotifications;
         TasksStripMenuItem.IsChecked = Vm.ShowTasksStrip;
@@ -4269,8 +4269,8 @@ public partial class MainWindow : Window
         var mode = (StageMode)StageModeCombo.SelectedIndex;
         if (mode == StageMode.Rect && Vm.StageRect == null)
         {
-            // Custom rect can only be defined via CLI (sessiondeck stage --rect x,y,w,h).
-            SetStatus("A custom rect can only be set from the CLI: sessiondeck stage --rect x,y,w,h");
+            // Custom rect can only be defined via CLI (tabtower stage --rect x,y,w,h).
+            SetStatus("A custom rect can only be set from the CLI: tabtower stage --rect x,y,w,h");
             SyncCombosFromVm();
             return;
         }

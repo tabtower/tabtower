@@ -1,10 +1,10 @@
 ﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
-using SessionDeck.Models;
-using SessionDeck.Services;
+using TabTower.Models;
+using TabTower.Services;
 
-namespace SessionDeck.ViewModels;
+namespace TabTower.ViewModels;
 
 /// <summary>
 /// <c>Replaced</c> (this fork, v0.9.61): the session handed its work to a successor and its own

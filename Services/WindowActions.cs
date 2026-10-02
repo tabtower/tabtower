@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using System.IO;
-using SessionDeck.Interop;
+using TabTower.Interop;
 
-namespace SessionDeck.Services;
+namespace TabTower.Services;
 
 public static class WindowActions
 {

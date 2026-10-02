@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace SessionDeck.Interop;
+namespace TabTower.Interop;
 
 [StructLayout(LayoutKind.Sequential)]
 public struct RECT

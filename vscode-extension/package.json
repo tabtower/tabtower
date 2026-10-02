@@ -1,12 +1,12 @@
 {
-  "name": "sessiondeck-connector",
-  "displayName": "SessionDeck Connector",
-  "description": "Reports Claude Code tabs and the git branch to SessionDeck, and opens/resumes Claude sessions on request.",
-  "version": "0.6.17",
-  "publisher": "eyal-sinay",
+  "name": "tabtower-connector",
+  "displayName": "TabTower Connector",
+  "description": "Reports Claude Code tabs and the git branch to TabTower, and opens/resumes Claude sessions on request.",
+  "version": "0.7.0",
+  "publisher": "tabtower",
   "repository": {
     "type": "git",
-    "url": "https://github.com/eyalBPM/SessionDeck.git"
+    "url": "https://github.com/tabtower/tabtower.git"
   },
   "icon": "assets/logo128.png",
   "license": "MIT",
@@ -31,8 +31,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "sessiondeck.sync",
-        "title": "SessionDeck: Sync Now"
+        "command": "tabtower.sync",
+        "title": "TabTower: Sync Now"
       }
     ]
   },

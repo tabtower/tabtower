@@ -1,8 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
-using SessionDeck.Models;
+using TabTower.Models;
 
-namespace SessionDeck;
+namespace TabTower;
 
 /// <summary>
 /// Width input for the custom zone modes. Returns the text as typed;
