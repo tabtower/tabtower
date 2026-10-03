@@ -35,7 +35,17 @@ function Invoke-TabTower([string]$ExePath, [string]$Arguments) {
 function Test-SameContent([string]$Source, [string]$Destination) {
     if (-not (Test-Path $Destination)) { return $false }
     if ((Get-Item $Source).Length -ne (Get-Item $Destination).Length) { return $false }
-    return (Get-FileHash $Source -Algorithm SHA256).Hash -eq (Get-FileHash $Destination -Algorithm SHA256).Hash
+    return (Get-Sha256 $Source) -eq (Get-Sha256 $Destination)
+}
+
+# .NET directly rather than Get-FileHash: Windows PowerShell started from a PowerShell 7 shell
+# inherits PSModulePath from it, cannot load Get-FileHash, and the install then stops halfway
+# with the running app already quit.
+function Get-Sha256([string]$Path) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($Path)
+    try { return [System.BitConverter]::ToString($sha.ComputeHash($stream)) }
+    finally { $stream.Dispose(); $sha.Dispose() }
 }
 
 if (-not (Test-Path (Join-Path $src 'TabTower.exe'))) {

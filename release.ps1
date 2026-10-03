@@ -5,7 +5,7 @@
 #
 # The version in TabTower.csproj is the single source of truth. The script:
 #   guards (clean tree, main, unreleased version) -> syncs the hook-script version header
-#   -> publishes self-contained -> runs the install-hooks tests against the published exe
+#   -> publishes self-contained -> runs the install-hooks and doctor tests against the published exe
 #   -> packages the vsix only if the extension changed -> zips -> prepends CHANGELOG.md
 #   -> deletes every older release -> gh release create.
 # PowerShell 5.1 compatible.
@@ -105,9 +105,11 @@ if ($exeVer -ne $ver) { Fail "published exe reports $exeVer, expected $ver." }
 $bytes = [IO.File]::ReadAllBytes((Join-Path $pubDir 'hooks\tabtower-hook.ps1'))
 if (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) { Fail "published hook script lost its BOM." }
 
-Step "install-hooks tests against the published exe"
-powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repo 'tests\install-hooks.tests.ps1') -Exe $pubExe
-if ($LASTEXITCODE -ne 0) { Fail "tests failed." }
+Step "install-hooks and doctor tests against the published exe"
+foreach ($suite in 'install-hooks', 'doctor') {
+    powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repo "tests\$suite.tests.ps1") -Exe $pubExe
+    if ($LASTEXITCODE -ne 0) { Fail "$suite tests failed." }
+}
 
 # --- VSCode extension ------------------------------------------------------------
 Step "VSCode extension"

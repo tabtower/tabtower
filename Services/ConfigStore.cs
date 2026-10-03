@@ -27,10 +27,15 @@ public sealed class ConfigStore
         _debounce.Tick += (_, _) => { _debounce.Stop(); SaveNow(); };
     }
 
+    /// <summary>True when this start found no config at all, not even one to carry over from
+    /// an earlier name: the very first run on this machine.</summary>
+    public static bool FirstStart { get; private set; }
+
     public static AppConfig Load()
     {
         CopyFormerNameConfig();
         MigrateLegacyConfig();
+        FirstStart = !File.Exists(ConfigPath);
         try
         {
             if (File.Exists(ConfigPath))

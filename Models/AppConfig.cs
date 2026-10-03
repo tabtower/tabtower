@@ -442,12 +442,12 @@ public class AppConfig
     /// that can no longer be grabbed with the mouse.</summary>
     public double TasksSplitRatio { get; set; } = 0.5;
     /// <summary>The live DWM preview of the bound VSCode window on every workspace card.
-    /// Off by default in this fork (it is rarely read, and it costs 170px on every card,
-    /// which is the deck's scarcest resource). Off, the band collapses to
-    /// nothing on a connected card and to the two-line "no window" hint on a disconnected one,
-    /// and the thumbnail is unregistered rather than merely hidden. The ⚙ menu brings it
-    /// back.</summary>
-    public bool ShowWindowPreviews { get; set; }
+    /// On by default: it is the first thing a new user sees the deck do, and a config saved
+    /// before this setting existed gets it on as well, as it always had. It costs 170px on
+    /// every card, which is the deck's scarcest resource, so the ⚙ menu turns it off. Off, the
+    /// band collapses to nothing on a connected card and to the two-line "no window" hint on a
+    /// disconnected one, and the thumbnail is unregistered rather than merely hidden.</summary>
+    public bool ShowWindowPreviews { get; set; } = true;
     public List<CustomToggleConfig> CustomToggles { get; set; } = new();
     /// <summary>The VSCode instances a new session can be aimed at by modifier
     /// (<see cref="SessionGroupConfig"/>). Empty = the deck routes as it always did, to the

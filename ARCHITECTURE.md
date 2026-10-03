@@ -42,6 +42,7 @@ VSCode extension ─────────────────────
 | `Cli/CliClient.cs` | Client side: argv onto the pipe, response out. Owns the `help` text. |
 | `Cli/CommandExecutor.cs` | Server side: every CLI verb. Runs **on the UI thread** (the pipe handler dispatches), so it can touch view-models directly. |
 | `Cli/HookInstaller.cs` | `install-hooks` / `uninstall-hooks`. Runs locally without a live app. Must match `hooks/README.md` exactly. |
+| `Cli/SetupCheck.cs` | `doctor`: are the hooks registered and the two VS Code extensions installed. Runs locally; the app also shows its problems once, on the very first start. |
 | `Services/PipeServer.cs` | The pipe. Two client kinds on one name, told apart by the first line: a CLI request (`{"Argv":[...]}`, one response, close) or a VSCode connector (`{"Type":"vscode-sync"}`, stays open). |
 
 ### The engine

@@ -82,6 +82,9 @@ public static class CliClient
         tabtower quit                          close the running app cleanly (saves config, releases the zone)
         tabtower install-hooks [--settings <path>] [--dry-run]     register the Claude Code hooks
         tabtower uninstall-hooks [--settings <path>]               remove them (runs locally, app not needed)
+        tabtower doctor [--settings <path>] [--extensions-dir <path>]   check the hooks and the VS Code
+                                                  extensions are in place (runs locally; also shown
+                                                  once on the very first start if anything is missing)
         tabtower toggle list | get <id> | set <id> on|off    user-defined flags;
                                                   state is mirrored to %APPDATA%\TabTower\toggles\<id>
         tabtower tasks [--file "<path>.json" | --off | --page on|off]   external tasks panel:

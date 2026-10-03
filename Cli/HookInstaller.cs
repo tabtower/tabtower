@@ -195,6 +195,42 @@ public static class HookInstaller
             root.Remove("hooks");
     }
 
+    /// <summary>For the setup check: how many of the hook events carry a TabTower command, the
+    /// script paths those commands run, and whether any command still runs the former script.</summary>
+    internal static (int Registered, int Expected, List<string> Scripts, bool FormerName) Inspect(JsonObject root)
+    {
+        int registered = 0;
+        var scripts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool former = false;
+        var hooks = root["hooks"] as JsonObject;
+        foreach (var (evt, _) in HookTable)
+        {
+            bool found = false;
+            if (hooks?[evt] is JsonArray groups)
+            {
+                foreach (var command in groups.OfType<JsonObject>()
+                             .SelectMany(g => g["hooks"] as JsonArray ?? new JsonArray())
+                             .OfType<JsonObject>()
+                             .Select(h => h["command"] is JsonValue v && v.TryGetValue(out string? c) ? c : null))
+                {
+                    if (command == null) continue;
+                    if (command.Contains(ScriptName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        found = true;
+                        var m = System.Text.RegularExpressions.Regex.Match(command, "-File \"([^\"]+)\"");
+                        if (m.Success) scripts.Add(m.Groups[1].Value);
+                    }
+                    else if (command.Contains(Services.LegacyName.HookScript, StringComparison.OrdinalIgnoreCase))
+                    {
+                        former = true;
+                    }
+                }
+            }
+            if (found) registered++;
+        }
+        return (registered, HookTable.Length, scripts.ToList(), former);
+    }
+
     private static int Fail(string message)
     {
         Console.Error.WriteLine("tabtower: " + message);

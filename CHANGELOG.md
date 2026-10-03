@@ -1,9 +1,10 @@
 # Changelog
 
-Every version of SessionDeck, newest first.
+Every version of TabTower, newest first. Versions up to v0.9.9 shipped under the
+project's former name, SessionDeck.
 
 Only the current release stays on the
-[Releases page](https://github.com/eyalBPM/SessionDeck/releases) - older ones are deleted
+[Releases page](https://github.com/tabtower/tabtower/releases) - older ones are deleted
 so the page never accumulates self-contained zips nobody downloads. Their **tags survive**,
 so any version below can be rebuilt from source with `git checkout v<version>` followed by
 a publish. This file is the history the Releases page cannot hold; `release.ps1` prepends

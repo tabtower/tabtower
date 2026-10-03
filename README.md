@@ -144,7 +144,7 @@ dotnet build -c Release          # requires the .NET 10 SDK
 
 The first launch starts the UI and the pipe server. Any later invocation with arguments acts as a CLI client against it.
 
-**Wire up the hooks** — `TabTower.exe install-hooks` merges the eleven hooks into `~/.claude/settings.json`, pointing at the hook script next to the exe (backup + idempotent; `uninstall-hooks` reverts). See [`hooks/README.md`](hooks/README.md) for what each hook does.
+**Wire up the hooks** — `TabTower.exe install-hooks` merges the eleven hooks into `~/.claude/settings.json`, pointing at the hook script next to the exe (backup + idempotent; `uninstall-hooks` reverts). See [`hooks/README.md`](hooks/README.md) for what each hook does. `TabTower.exe doctor` then checks that the hooks and both VS Code extensions are in place.
 
 **Build the VSCode extension** (enables tab activation and live tab labels). The `.vsix` is not checked in:
 
@@ -174,6 +174,7 @@ tabtower reconcile                    # close sessions whose tab or window is go
 tabtower quit                         # close the running app cleanly
 tabtower install-hooks [--settings <path>] [--dry-run]   # register the Claude Code hooks
 tabtower uninstall-hooks              # remove them (both run locally, no app needed)
+tabtower doctor                       # check the hooks and the VS Code extensions are in place
 
 tabtower session start  --id <session_id> --workspace <name> [--title "..."]
 tabtower session status --id <session_id> --state working|waiting|done|wrapped|replaced|error|idle

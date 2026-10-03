@@ -41,7 +41,7 @@ namespace TabTower.Services;
 /// status=running), and this says which of those ids was a Monitor. Intersect the two and you
 /// have the watches that are actually live, which is the only form of the question the deck can
 /// answer honestly.</param>
-/// <param name="JobTaskIds">The background-task ids this session launched as backgrounded Bash
+/// <param name="JobTaskIds">The background-task ids this session launched as backgrounded Bash or PowerShell
 /// JOBS — the same missing half as <paramref name="MonitorTaskIds"/>, for the other kind of
 /// machine work that ends a turn. A job differs from a Monitor in one way that matters to the
 /// person reading the deck: it is computing and it will finish, where a monitor only listens and
@@ -570,7 +570,10 @@ public static class TranscriptReader
                             sawToolBlock = true;
                             string? name = block.TryGetProperty("name", out var n) ? n.GetString() : null;
                             string? id = block.TryGetProperty("id", out var i) ? i.GetString() : null;
-                            if (name == "Bash" && id != null &&
+                            // PowerShell takes run_in_background exactly as Bash does. Checking
+                            // Bash alone left a card saying "your turn" while a backgrounded
+                            // PowerShell job was still running.
+                            if (name is "Bash" or "PowerShell" && id != null &&
                                 block.TryGetProperty("input", out var bin) &&
                                 bin.TryGetProperty("run_in_background", out var bg) &&
                                 bg.ValueKind == JsonValueKind.True &&

@@ -1,8 +1,8 @@
-# SessionDeck — working notes for Claude Code
+# TabTower — working notes for Claude Code
 
 A WPF (.NET 10, Windows-only) control deck for Claude Code sessions. The UI and the CLI
 are **the same exe**: launched with no arguments it raises the window plus a named-pipe
-server (`\\.\pipe\sessiondeck`); launched with arguments it acts as a client against the
+server (`\\.\pipe\tabtower`); launched with arguments it acts as a client against the
 running instance. A companion VSCode extension (`vscode-extension/`) reports tabs and the
 git branch over that pipe and opens sessions on request.
 
@@ -10,16 +10,20 @@ Public-facing overview: [`README.md`](README.md). Hook wiring, the waiting-detec
 thresholds and the toggles: [`hooks/README.md`](hooks/README.md) — that file is the
 authoritative source `Cli/HookInstaller.cs` must match exactly.
 
+**Which file holds what:** [`ARCHITECTURE.md`](ARCHITECTURE.md) — the code map. Read it
+before hunting for where a behaviour lives; `MainWindow.xaml.cs` holds most of the engine
+and that is not obvious from the file list.
+
 ## Build, run, deploy
 
 **The running app locks its own exe.** Building over a live instance fails with MSB3027.
 Always:
 
 ```powershell
-.\bin\Debug\net10.0-windows\SessionDeck.exe quit     # graceful — releases the AppBar
+.\bin\Debug\net10.0-windows\TabTower.exe quit     # graceful — releases the AppBar
 Start-Sleep -Milliseconds 1500
 dotnet build -c Debug
-Start-Process .\bin\Debug\net10.0-windows\SessionDeck.exe
+Start-Process .\bin\Debug\net10.0-windows\TabTower.exe
 ```
 
 Never `Stop-Process -Force`: the Reserved Zone is released in `OnClosing` only, and a
@@ -29,56 +33,89 @@ tell why.
 To compile without touching a running instance (a syntax check that skips the copy step):
 
 ```powershell
-dotnet msbuild SessionDeck.csproj -t:Compile -p:Configuration=Debug -v:m
+dotnet msbuild TabTower.csproj -t:Compile -p:Configuration=Debug -v:m
 ```
 
 `WinExe` means CLI output only reaches a parent console through
 `AttachConsole(ATTACH_PARENT_PROCESS)` — expect no captured stdout from tooling.
 
+The app is a singleton: one named mutex and one pipe are shared by every build, so an
+installed copy and a dev build never run side by side. Quit one before starting the other.
+
 ## Tests
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\install-hooks.tests.ps1 -Exe <path to SessionDeck.exe>
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\install-hooks.tests.ps1 -Exe <path to TabTower.exe>
 ```
 
-38 cases over the `install-hooks` / `uninstall-hooks` merge: a missing settings file, an
-empty one, hooks from an old path, another tool's hooks on the same event, malformed
-JSON, a second run in a row, dry-run, and a shared group where only our entry may be
-removed. Run it against the exe you actually built.
+Cases over the `install-hooks` / `uninstall-hooks` merge: a missing settings file, an empty
+one, hooks from an old path, another tool's hooks on the same event, malformed JSON, a second
+run in a row, dry-run, a shared group where only our entry may be removed, and registrations
+left by the app's former name. Run it against the exe you actually built.
+
+`tests\doctor.tests.ps1 -Exe <path>` covers `doctor` the same way (temp settings files and a
+temp extensions folder). `release.ps1` runs both suites against the published exe.
 
 **These tests passing does not mean the status lifecycle works.** They cover the
-installer only. A card can stay blue, blink wrongly or go quiet while all 38 pass —
+installer only. A card can stay blue, blink wrongly or go quiet while all of them pass —
 see "Debugging status and blink" below.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\close-tab.tests.ps1
+```
+
+Cases over `session close-tab` / `session end --close-tab`. It needs the INSTALLED app
+running, because it stands a fake VSCode connector on the named pipe and reads back the exact
+JSON the deck pushes — which proves the deck half without touching a real window, including
+the capability check that refuses an older connector. It must run **in the calling
+PowerShell process**, not a nested `pwsh -File`: `WinExe` means the CLI writes through
+`AttachConsole(ATTACH_PARENT_PROCESS)`, so a parent that HAS a console gets the output on
+screen and the redirect file comes back empty. The extension half is out of its reach and
+still needs a window running the new connector.
 
 ## Versioning
 
-Every code change bumps `<Version>` in `SessionDeck.csproj`. Three versions move
+Every code change bumps `<Version>` in `TabTower.csproj`. Three versions move
 independently and are printed together by `install.ps1` so a mismatch is visible:
 
 | Part | Where |
 |---|---|
-| App | `SessionDeck.csproj` → `<Version>` |
-| Hook script | the `# Version:` header in `hooks/sessiondeck-hook.ps1` — `release.ps1` syncs it from the csproj |
+| App | `TabTower.csproj` → `<Version>` |
+| Hook script | the `# Version:` header in `hooks/tabtower-hook.ps1` — `release.ps1` syncs it from the csproj |
 | VSCode extension | `vscode-extension/package.json` → `version`, bumped only when the extension changes |
 
-`hooks/sessiondeck-hook.ps1` is saved **UTF-8 with BOM** and must stay that way:
+`hooks/tabtower-hook.ps1` is saved **UTF-8 with BOM** and must stay that way:
 PowerShell 5.1 reads a BOM-less `.ps1` as ANSI and mangles the non-ASCII characters in
 its comments.
+
+**Two branches that pick the same version do NOT conflict, and nothing else warns either.**
+Both sides write the identical string, so git merges the line clean: a version collision is
+invisible precisely because it is a collision, and the result is two different binaries under
+one number. **Read the version on `origin/main`, not the one in your own base, immediately
+before bumping.** `git show origin/main:TabTower.csproj | grep '<Version>'` after a
+`git fetch` is the whole check.
 
 ## Git
 
 - Branch before editing. Never work directly on `main`.
-- No commit and no push without explicit approval in the conversation.
+- Commit whenever a change is coherent and verified, with a message that explains the why.
+- **Verify a push against the remote, not against the exit code.** `git ls-remote origin main`,
+  or a `git fetch` then `git log --oneline origin/main -1`, is the check.
 - Temporary zip/publish artifacts: add the pattern to `.gitignore` *before* creating them.
 
 ## UI language and text direction
 
-The UI chrome is **English and LTR** (v0.9.0). That is a product decision, not a
-preference — the repo is public.
+The UI chrome is **English and LTR**.
 
 Text that comes from **outside** the app is a different matter and must stay
 direction-aware: workspace, session and task names, descriptions, tooltips, status values
-from the tasks file, search input, git branch names. They are frequently Hebrew.
+from the tasks file, search input, git branch names. Hebrew or Arabic content there renders
+right-to-left.
+
+One deliberate exception: the **task card** header (`TaskItemView.xaml`) is pinned
+RightToLeft rather than derived per string. Deriving it left a right-to-left task and a
+left-to-right task in the same list aligned differently, which breaks scanning the list.
+Same card: id hard left, then status, then the name.
 
 - `Services/FlowDirectionConverter.cs` (keyed `Rtl` in `App.xaml`) resolves direction from
   the first strong character. Bind a control's `FlowDirection` through it rather than
@@ -90,40 +127,40 @@ from the tasks file, search input, git branch names. They are frequently Hebrew.
 - **Remember that `FlowDirection` mirrors layout, not just glyphs.** `HorizontalAlignment`,
   `DockPanel.Dock` and `Margin` all flip with it. When changing a container's direction,
   re-check the alignment of everything inside it.
-- One deliberate exception: the toolbar's `IconStrip` in `MainWindow.xaml` is
-  `RightToLeft` as a **layout device** — it controls which icons overflow to the second row
-  first, so ⚙ keeps the top row. It holds no text. Don't "fix" it.
+- The toolbar's `IconStrip` in `MainWindow.xaml` is `RightToLeft` as a **layout device** — it
+  controls which icons overflow to the second row first, so ⚙ keeps the top row. It holds no
+  text. Don't "fix" it.
 
 ## Debugging status and blink
 
-Card status is driven from two independent sources, and most bugs live in the seam
-between them:
+Card status comes from four sources: the hooks, the transcript scanner, Claude Code's
+`background_tasks`, and pending `tool_use` witnesses. Most bugs live in the seam between them,
+so before touching status, blink or tab-tracking code, find which source set the state you are
+looking at. The debug log (`tabtower log --debug on`, files in `%APPDATA%\TabTower\logs`)
+records every status transition; read it before reasoning about one.
 
-1. **Claude Code hooks** → `sessiondeck session status ...`. The leading edge: immediate
-   and certain, but `PermissionRequest` has no matching "resolved" event.
-2. **The transcript scanner** (every 10s) — a `tool_use` with no `tool_result`. The only
-   thing that sees a call *finish*. Driven by the transcript's mtime, which stops growing
-   while a permission dialog is open.
+- **The session group a session runs in comes from the hook, and only from the hook.** The
+  bridge sends the NAME of the configuration folder the session's VSCode instance was started
+  with (`CLAUDE_SECURESTORAGE_CONFIG_DIR`) on `SessionStart`, `UserPromptSubmit` and `Stop`, and
+  the deck maps it to a group through the group's `ConfigDir`. Do not try to infer it from tab
+  labels or from a connection's tab list: two extension hosts on one folder report identical
+  tab lists, and labels collide. A recorded group is never cleared.
+- **A dead session's tab is closed through the connector, by a unique label, and a dead
+  session is never revealed.**
+- When tuning any detection: **precision over coverage**. A false alarm teaches the user to
+  ignore the deck, which costs more than a missed one. Measure the false-alarm rate before
+  lowering a threshold.
 
-Before theorizing about a blink or status bug, **read the diagnostic log** at
-`%APPDATA%\SessionDeck\logs`. Payload-level checks and the test suite both pass while the
-lifecycle is broken; the log is what shows the actual ordering of hook arrival versus
-scan. The thresholds, the false-alarm measurements behind them and the
-`PermissionDialogScanMark` bound are documented in [`hooks/README.md`](hooks/README.md).
+## Why the code looks like this (design notes)
 
-When tuning any detection: **precision over coverage**. A false alarm teaches the user to
-ignore the deck, which costs more than a missed one. Measure the false-alarm rate before
-lowering a threshold.
-
-## Settled decisions — don't re-litigate
-
-Numbered as they were in the original spec, because code comments cite them by number.
+Numbered as they were in the original spec, because code comments cite them by number. They
+explain existing behaviour so a change is made knowingly.
 
 | # | Decision |
 |---|---|
-| 11 | **Status scheme.** `working` = steady blue (orange is reserved exclusively for `waiting`), `waiting` = blinking orange, `done` = blinking green → steady on acknowledge, `error` = blinking red → steady, `idle` = grey. The status→colour/blink map lives in config (`StatusStyles`), so it changes without touching hooks or code. |
-| 12 | **A session that closes** disappears from the normal view and stays available in the card's expanded view (▼) with a resume option. Retention: the last ~20 closed sessions per workspace (`ClosedSessionRetention`). |
-| 13 | **VSCode only in the UI.** The engine underneath stays generic (any top-level window can be tracked, pinned and driven), but the UI and the flows are filtered to VSCode. Terminal support: maybe some day, not now. |
+| 11 | **Status scheme.** `idle` = grey, `working` = steady blue (orange is reserved for `waiting`), `waiting` = blinking orange, `done` = blinking purple → steady on acknowledge, `error` = blinking red → steady, `wrapped` = green (the session was closed out for good), `replaced` = steady white (handed off to a successor and killed; not an alert, so no blink). The status → colour/blink map lives in config (`StatusStyles`), so it changes without touching hooks or code. |
+| 12 | **A session that closes** disappears from the normal view and stays available in the card's expanded view (▼) with a resume option. Retention: the last ~20 closed sessions per workspace (`ClosedSessionRetention`). The expanded view collapses itself after five minutes, because being expanded is invisible once the header scrolls away. |
+| 13 | **VSCode only in the UI.** The engine underneath stays generic (any top-level window can be tracked, pinned and driven), but the UI and the flows are filtered to VSCode. |
 | 15 | **The app is a control deck for Claude Code sessions**, not a generic window grid. Tile data from the pre-cards era is still round-tripped in config as a legacy field so nothing is lost, but it is never displayed. |
 | 16 | **Workspaces are persistent entities** — remembered with no window open. Active ones (bound window or live session) float to the top; old ones can be hidden. Wide cards with a minimum size, wrapping by width, inside a vertical scroll area. |
 | 17 | **Main card content:** project name + the current git branch. Custom title and description are supported on both card levels. |

@@ -15,6 +15,8 @@ public static class Program
             // Install commands run locally — they must work before the app has ever started.
             if (args[0] is "install-hooks" or "uninstall-hooks")
                 return Cli.HookInstaller.Run(args);
+            if (args[0] == "doctor")
+                return Cli.SetupCheck.Run(args);
 
             return Cli.CliClient.Run(args);
         }

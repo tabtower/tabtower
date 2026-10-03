@@ -101,6 +101,8 @@ public partial class MainWindow : Window
         PreviewKeyDown += Window_PreviewKeyDown;   // Esc closes the tasks page
         SourceInitialized += OnSourceInitialized;
         Loaded += (_, _) => UpdateEmptyHint();
+        if (ConfigStore.FirstStart)
+            Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, ShowSetupProblems);
         Closing += OnClosing;
         LocationChanged += (_, _) => { if (Vm.ZoneMode == ZoneMode.Off) QueueSave(); };
         SizeChanged += (_, _) => { if (Vm.ZoneMode == ZoneMode.Off) QueueSave(); };
@@ -4582,6 +4584,22 @@ public partial class MainWindow : Window
 
     private void UpdateEmptyHint()
         => EmptyHint.Visibility = Vm.Workspaces.Any(w => w.VisibleInDeck) ? Visibility.Collapsed : Visibility.Visible;
+
+    /// <summary>First start only: say what is missing before the user wonders why every card
+    /// stays grey. The installer sets all of it up first, so after an install this says nothing;
+    /// it speaks to a build from source, or a setup that lost a piece.</summary>
+    private void ShowSetupProblems()
+    {
+        var problems = SetupCheck.Check(SetupCheck.DefaultSettingsPath, SetupCheck.DefaultExtensionsDir)
+            .Where(f => f.Status == "FIX").ToList();
+        if (problems.Count == 0) return;
+        LogService.Info("setup", $"first start: {problems.Count} setup problem(s) shown");
+        MessageBox.Show(this,
+            "TabTower is running, but it cannot follow your Claude Code sessions yet:\n\n" +
+            string.Join("\n\n", problems.Select(p => "• " + p.Text)) +
+            "\n\nRun 'tabtower doctor' to check again after fixing.",
+            "TabTower setup", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
 
     // ---- CLI ----
 

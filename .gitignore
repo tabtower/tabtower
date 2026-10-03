@@ -20,7 +20,7 @@ publish/
 Thumbs.db
 desktop.ini
 
-# scratch patterns (start-feature)
+# scratch files
 *.tmp
 *.scratch.md
 tests/scratch/
