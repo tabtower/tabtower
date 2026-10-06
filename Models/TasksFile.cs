@@ -58,6 +58,12 @@ public class NavEntry
     public bool IsParent { get; set; }
     /// <summary>Where a click goes, opened exactly like a task's url.</summary>
     public string? Url { get; set; }
+    /// <summary>Optional fill colour (name or #RRGGBB) chosen by the producer, e.g. to show how
+    /// much open work a project holds. Missing = the default structure fill.</summary>
+    public string? Fill { get; set; }
+    /// <summary>Optional extra tooltip line written by the producer (e.g. how many items are
+    /// still open). Text, not a number, so the wording and the language stay the producer's.</summary>
+    public string? Detail { get; set; }
     public List<NavEntry> Children { get; set; } = new();
 }
 

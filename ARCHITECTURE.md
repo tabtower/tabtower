@@ -160,7 +160,9 @@ window bind is moved onto the same window.
 thing to survive - it is how separate Claude Code configurations are kept apart, one per
 `--user-data-dir`. `SessionGroups` (config) names each instance by a marker in its window titles
 and binds it to a modifier, and `NewSessionInVscode` takes the resulting group instead of asking
-`FindConnector` to guess. A running session is placed in its group by `StampGroupFromHook`: the
+`FindConnector` to guess. For a task, `TaskTarget` (`MainWindow.Tasks.cs`) picks the folder AND the
+group: a group typed in the Run box, else - with `TasksFollowGroups` on - the held modifier across
+all groups, opening in that group's folder (Shift keeps the task's own folder). A running session is placed in its group by `StampGroupFromHook`: the
 hook reports the folder name of the session's `CLAUDE_SECURESTORAGE_CONFIG_DIR` as
 `--config-dir`, and the group whose `ConfigDir` claims that name wins (`--group <id>` still works
 for scripts). A group is never approximated: with its instance not running the deck

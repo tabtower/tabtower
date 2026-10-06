@@ -292,13 +292,13 @@
                 <Button DockPanel.Dock="Right" Content="Run" Click="RunTask_Click"
                         Background="#FF3A6EA5" Foreground="White" BorderThickness="0"
                         Padding="12,3" Margin="6,0,0,0" Cursor="Hand"
-                        ToolTip="Open a session for that task — the same thing its card's “New session” button does. On a card with session groups, the held modifier picks the group."/>
+                        ToolTip="Open a session for that task — the same thing its card's “New session” button does. On a card with session groups, the held modifier picks the group; with TasksFollowGroups on it picks one for every task, and Shift opens the task in its own folder."/>
                 <!-- A task number is ASCII and must not follow the UI's direction. -->
                 <TextBox x:Name="RunTaskBox" VerticalContentAlignment="Center" FontSize="13"
                          Background="#FF2A2A2A" Foreground="White" BorderBrush="#FF444444"
                          CaretBrush="White" Padding="6,3" FlowDirection="LeftToRight"
                          KeyDown="RunTaskBox_KeyDown" TextChanged="RunTaskBox_TextChanged"
-                         ToolTip="A task number, e.g. 4.13 or 4.13.19. Enter runs it. Add “fast” for the task's fast variant, and a group's id or alias — or hold its modifier — to pick which VS Code instance it opens in."/>
+                         ToolTip="A task number, e.g. 4.13 or 4.13.19. Enter runs it. Add “fast” for the task's fast variant, and a group's id or alias — or hold its modifier — to pick which VS Code instance it opens in. With TasksFollowGroups on, Shift+Enter opens the task in its own folder."/>
             </DockPanel>
             <DockPanel Grid.Column="0" LastChildFill="True">
                 <TextBlock x:Name="SearchScopeLabel" DockPanel.Dock="Left" Text="🔍 Sessions"

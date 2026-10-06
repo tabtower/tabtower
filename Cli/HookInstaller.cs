@@ -31,7 +31,7 @@ public static class HookInstaller
         ("StopFailure", null),
         ("SessionEnd", null),
         ("PreToolUse", "AskUserQuestion|ExitPlanMode"),
-        ("PostToolUse", "AskUserQuestion|ExitPlanMode|Agent"),
+        ("PostToolUse", "AskUserQuestion|ExitPlanMode|Agent|Workflow"),
         ("Elicitation", null),
         ("ElicitationResult", null),
     };

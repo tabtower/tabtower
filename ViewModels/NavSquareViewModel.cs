@@ -32,19 +32,36 @@ public sealed class NavSquareViewModel : INotifyPropertyChanged
     public bool Selected
     {
         get => _selected;
-        set { if (_selected != value) { _selected = value; Raise(); Raise(nameof(FillBrush)); } }
+        set
+        {
+            if (_selected != value)
+            {
+                _selected = value;
+                Raise(); Raise(nameof(FillBrush)); Raise(nameof(SelectionRingBrush));
+            }
+        }
     }
 
-    public Brush FillBrush => _selected ? SelectedFill : IsParent ? ParentFill : LeafFill;
+    /// <summary>A fill the producer chose (the root column's open-work load). When present it
+    /// owns the fill outright, so selection can no longer be shown by repainting the box.</summary>
+    public Brush? LoadFill { get; init; }
+    public string Detail { get; init; } = "";
+
+    public Brush FillBrush => LoadFill ?? (_selected ? SelectedFill : IsParent ? ParentFill : LeafFill);
+
+    /// <summary>Selection on a load-coloured square: a white ring inside the status border, so
+    /// neither the load colour nor the status is given up to mark where you are.</summary>
+    public Brush SelectionRingBrush => _selected && LoadFill != null ? Brushes.White : Brushes.Transparent;
 
     private static readonly Brush ParentFill = SessionViewModel.MakeBrush("#576076");
     private static readonly Brush LeafFill = SessionViewModel.MakeBrush("#1A1A1A");
     private static readonly Brush SelectedFill = SessionViewModel.MakeBrush("#8FA0C0");
 
-    /// <summary>Name and full number, nothing else — the card already prints the rest, and a
-    /// tooltip the size of a card is what makes a grid unreadable. Two
-    /// lines rather than one so the Hebrew name and the LTR number never share a line.</summary>
-    public string TooltipText => Name + Environment.NewLine + Number;
+    /// <summary>Name and full number, plus the producer's detail line when it sent one — the
+    /// card already prints the rest, and a tooltip the size of a card is what makes a grid
+    /// unreadable. One fact per line so the Hebrew name and the LTR number never share a line.</summary>
+    public string TooltipText => Name + Environment.NewLine + Number
+        + (Detail.Length > 0 ? Environment.NewLine + Detail : "");
 
     public static NavSquareViewModel From(NavEntry entry, IReadOnlyDictionary<string, string> statusColors)
     {
@@ -63,6 +80,9 @@ public sealed class NavSquareViewModel : INotifyPropertyChanged
             IsParent = entry.IsParent,
             Url = entry.Url?.Trim() ?? "",
             StatusBrush = brush,
+            LoadFill = entry.Fill?.Trim() is { Length: > 0 } fill && ColorUtil.TryParse(fill, out _)
+                ? SessionViewModel.MakeBrush(fill) : null,
+            Detail = entry.Detail?.Trim() ?? "",
             Children = entry.Children.Select(c => From(c, statusColors)).ToList(),
         };
     }

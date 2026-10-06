@@ -164,9 +164,15 @@
                             Background="{Binding FillBrush}" BorderBrush="{Binding StatusBrush}"
                             BorderThickness="2" Cursor="Hand" ToolTip="{Binding TooltipText}"
                             MouseLeftButtonUp="NavSquare_MouseUp">
-                        <TextBlock Text="{Binding Label}" Foreground="White" FontSize="11"
-                                   FlowDirection="LeftToRight"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Grid>
+                            <!-- selection ring for a square whose fill is the producer's
+                                 (load colour); transparent everywhere else -->
+                            <Border BorderBrush="{Binding SelectionRingBrush}" BorderThickness="2"
+                                    CornerRadius="2"/>
+                            <TextBlock Text="{Binding Label}" Foreground="White" FontSize="11"
+                                       FlowDirection="LeftToRight"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
                     </Border>
                 </DataTemplate>
             </Border.Resources>

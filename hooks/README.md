@@ -8,11 +8,12 @@
 | `UserPromptSubmit` | `session status --state working` | steady blue | the **prompt** itself (`--detail`, trimmed to 400 chars) |
 | `Notification` | `session status --state waiting` | blinking orange | the waiting message (`--detail` — e.g. "needs your permission to use Bash") |
 | `PermissionRequest` | `session status --state waiting --permission-dialog` | blinking orange | the tool and its argument (`--detail` — e.g. `Write: C:\Windows\Temp\x.txt`) |
-| `Stop` | `session status --state done` | blinking purple → steady once clicked | `--agents` — how many subagents the payload's `background_tasks` still lists as running (see below); a non-zero count lands on `working` instead. `--tasks` — the ids of the `shell` entries in that same list, forwarded raw and counted as nothing here (see below) |
+| `Stop` | `session status --state done` | blinking purple → steady once clicked | `--agents` — how many subagents the payload's `background_tasks` still lists as running (see below); a non-zero count lands on `working` instead. `--tasks` — the ids of the `shell` entries in that same list, forwarded raw and counted as nothing here (see below). `--workflows` — the ids of its `workflow` entries; any at all also lands on `working`, and the 🤖 chip counts their live agents (see "Workflow teams") |
 | `StopFailure` | `session status --state error` | red | the error message that killed the turn |
 | `PreToolUse` (AskUserQuestion / ExitPlanMode) | `session status --state waiting` | blinking orange | the question text / "Waiting for plan approval" — question forms are not permission requests, so they never raise `PermissionRequest` |
 | `PostToolUse` (same tools) | `session status --state working` | steady blue | the user answered — Claude is working again |
 | `PostToolUse` (`Agent`) | `session agents --launched` | unchanged — the count only | one background subagent was just dispatched: +1 to the 🤖 chip, so it appears with the agents instead of at the end of the turn (see below) |
+| `PostToolUse` (`Workflow`) | `session agents --workflow <task id>` | unchanged — the count only | a Workflow team was just launched: its id joins the live list at once, the same leading edge as `Agent` (see "Workflow teams") |
 | `Elicitation` | `session status --state waiting` | blinking orange | an input request from an MCP server — a real block that produces no `tool_use`, so the scanner is blind to it |
 | `ElicitationResult` | `session status --state working` | steady blue | the user answered the MCP server |
 | `SessionEnd` | `session end` | the card closes | `reason` (clear/logout/prompt_input_exit/other) |
@@ -261,6 +262,40 @@ Not covered, deliberately: after a deck restart the count is 0 until that sessio
 because the same conversation is continuing (see the next section — this is the fix for a card
 that dropped to idle the moment you clicked it).
 
+### Workflow teams: one task in the payload, many agents on disk (v0.11.6)
+
+A session that launches a team with the `Workflow` tool showed nothing at all: measured
+04-10-2026, a 3-agent run took six minutes, the turn that launched it ended as a plain `done`
+(purple, "your turn") seconds in, and no 🤖 ever appeared. Two reasons, both in the payload
+(Claude Code 2.1.289):
+
+- **The team is ONE `background_tasks` entry**, `type: "workflow"` with the workflow's `name`
+  and no agent count, and its agents are not `subagent` entries. So `--agents` was 0.
+- **Its agents never wake the session.** Only the team does, once, when it finishes. So no
+  hook fires while they come and go, and a count read at `Stop` would freeze on whatever it was
+  at that second.
+
+What carries the number is the run's own `journal.jsonl`, in the transcript dir the Workflow
+tool's answer names: a `started` line per agent as it comes up, then `result` or `failed` for
+the same `key`. Three parts, each doing one thing:
+
+- **The hook says which teams are alive.** `Stop` forwards the `workflow` entries' ids as
+  `--workflows` (empty included, trailing comma as for `--tasks`), and any at all holds the turn
+  exactly as a subagent does, because the team wakes the session when it ends. `PostToolUse` on
+  `Workflow` (added to the matcher) adds the id at launch, the same leading edge as `Agent`.
+- **The transcript says where each one writes.** The Workflow call's `toolUseResult` carries
+  `taskId`, `runId` and `transcriptDir`; the scanner maps both ids to the folder, so whichever
+  one the payload reports finds it.
+- **The deck reads the journal itself**, on the 10s metadata tick and after each transcript
+  scan, re-reading a file only when it changed. Live agents are the keys whose LAST line is
+  `started` — not started minus finished: a retry starts the same key again after `failed`
+  (one measured run: 581 started, 518 failed, 56 results). A killed run leaves agents
+  `started` forever, which is harmless only because a journal is read for a team the hook still
+  lists as running; a closed session's list is ignored for the same reason.
+
+The live list is persisted (a session waiting on a team is silent until it ends); the agent count
+is not, the next tick recomputes it.
+
 ### Dispatched headless runs: the other thing a session can have in the air (v0.9.47)
 
 A subagent shares its parent's `session_id`, so it never becomes a card of its own and the 🤖
@@ -429,7 +464,7 @@ The hooks are still installed and still useful: in the terminal they work fully,
       { "matcher": "AskUserQuestion|ExitPlanMode", "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" PreToolUse" } ] }
     ],
     "PostToolUse": [
-      { "matcher": "AskUserQuestion|ExitPlanMode|Agent", "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" PostToolUse" } ] }
+      { "matcher": "AskUserQuestion|ExitPlanMode|Agent|Workflow", "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" PostToolUse" } ] }
     ],
     "Elicitation": [
       { "hooks": [ { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\\path\\to\\TabTower\\hooks\\tabtower-hook.ps1\" Elicitation" } ] }

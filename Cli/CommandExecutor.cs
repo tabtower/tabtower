@@ -19,6 +19,7 @@ public sealed class CommandExecutor
         "id", "workspace", "state", "path",
         "detail", "transcript", "source", "mode", "reason", "debug", "file", "agents", "entrypoint",
         "prompt", "page", "view", "dispatcher", "group", "config-dir", "after", "tasks", "pid",
+        "workflow", "workflows",
     };
 
     private readonly MainWindow _window;
@@ -207,7 +208,12 @@ public sealed class CommandExecutor
             case "agents":
             {
                 if (!a.Options.TryGetValue("id", out var id)) return Err("session agents requires --id <session_id>");
-                if (!a.Flags.Contains("launched")) return Err("session agents requires --launched");
+                if (a.Options.TryGetValue("workflow", out var workflowId))
+                {
+                    var (wmsg, wok) = _window.NoteWorkflowLaunched(id, workflowId, HookInfoFrom(a));
+                    return wok ? Ok(wmsg) : Err(wmsg);
+                }
+                if (!a.Flags.Contains("launched")) return Err("session agents requires --launched or --workflow <task_id>");
                 var (msg, ok) = _window.NoteAgentLaunched(id, HookInfoFrom(a));
                 return ok ? Ok(msg) : Err(msg);
             }
@@ -591,6 +597,10 @@ public sealed class CommandExecutor
         // running clears the previous turn's list instead of leaving it to age.
         TaskIds: a.Options.TryGetValue("tasks", out var taskIds)
             ? taskIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : null,
+        // Same contract as --tasks: on every Stop, empty included.
+        WorkflowIds: a.Options.TryGetValue("workflows", out var workflowIds)
+            ? workflowIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             : null,
         Entrypoint: a.Options.GetValueOrDefault("entrypoint"),
         PrintMode: a.Flags.Contains("print-mode"),

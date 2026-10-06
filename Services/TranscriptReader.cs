@@ -71,6 +71,11 @@ namespace TabTower.Services;
 /// "last-prompt" record when a tab opens or closes, which bumps the mtime with no
 /// conversation behind it and read as a sign of life to the orphan sweep (issue
 /// 2026-08-09 — a session dead for three days kept its card).</param>
+/// <param name="WorkflowRuns">Every Workflow run this session launched: its task id AND its
+/// run id, each mapped to the run's transcript dir (where its journal lives). The Workflow
+/// tool's answer is the only place the id the Stop hook reports and the folder on disk meet.
+/// Like the Monitor ids, a type half and not a liveness signal: the hook says which are still
+/// running. Read from the whole file, not the tail, because a run outlives many turns.</param>
 public sealed record TranscriptInfo(
     string? TabTitle,
     string? AutoTitle,
@@ -83,7 +88,8 @@ public sealed record TranscriptInfo(
     IReadOnlyList<string>? JobTaskIds = null,
     bool EndsOnExit = false,
     string? Entrypoint = null,
-    DateTime? LastMessageAtUtc = null);
+    DateTime? LastMessageAtUtc = null,
+    IReadOnlyDictionary<string, string>? WorkflowRuns = null);
 
 /// <summary>What a session has spent, tallied from the <c>usage</c> block of every assistant
 /// turn in its transcript.
@@ -175,6 +181,7 @@ public static class TranscriptReader
             var commands = new List<string>();
             var tail = new Queue<string>(TailLines);
             var tokens = new UsageTally();
+            var workflowRuns = new Dictionary<string, string>(StringComparer.Ordinal);
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var reader = new StreamReader(stream);
             while (reader.ReadLine() is { } line)
@@ -186,6 +193,9 @@ public static class TranscriptReader
                 // also contain one of those markers inside its own text, and a request missed
                 // that way would silently under-report the total.
                 if (line.Contains(UsageMarker)) tokens.Add(line);
+                // Its own check for the same reason: the launch rides a user line (the tool_result),
+                // which the chain below may claim first.
+                if (line.Contains(WorkflowMarker)) ReadWorkflowRun(line, workflowRuns);
                 if (line.Contains("\"custom-title\""))
                 {
                     // /rename. An empty value (rename cleared) falls back to the ai-title.
@@ -258,7 +268,7 @@ public static class TranscriptReader
             var (entrypoint, lastMessageAt) = ReadHostAndLastMessage(tail);
             return new TranscriptInfo(tabTitle, autoTitle, pending, candidates, lost,
                                       tokens.Result(), foreground, monitors, jobs, endsOnExit,
-                                      entrypoint, lastMessageAt);
+                                      entrypoint, lastMessageAt, workflowRuns);
         }
         catch
         {
@@ -273,6 +283,29 @@ public static class TranscriptReader
 
     /// <summary>The entry the CLI appends as its process exits (see TranscriptInfo.EndsOnExit).</summary>
     private const string ExitMarker = "\"type\":\"cost-state\"";
+
+    /// <summary>Pre-filter for a Workflow launch (see TranscriptInfo.WorkflowRuns): the
+    /// structured answer of the Workflow tool carries <c>"taskType":"local_workflow"</c>.</summary>
+    private const string WorkflowMarker = "\"local_workflow\"";
+
+    /// <summary>The task id, run id and transcript dir of one Workflow launch, off the structured
+    /// answer the transcript stores beside the tool_result (<c>toolUseResult</c>, measured
+    /// 04-10-2026: status async_launched, taskId, taskType local_workflow, runId, transcriptDir).
+    /// Structured rather than read from the prose result, which is worded for the model and free
+    /// to change. Both ids are kept, so whichever one the Stop hook reports finds the folder.</summary>
+    private static void ReadWorkflowRun(string line, Dictionary<string, string> runs)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            if (!doc.RootElement.TryGetProperty("toolUseResult", out var r) || r.ValueKind != JsonValueKind.Object) return;
+            if (!r.TryGetProperty("taskType", out var type) || type.GetString() != "local_workflow") return;
+            if (!r.TryGetProperty("transcriptDir", out var d) || d.GetString() is not { Length: > 0 } dir) return;
+            foreach (var key in new[] { "taskId", "runId" })
+                if (r.TryGetProperty(key, out var v) && v.GetString() is { Length: > 0 } id) runs[id] = dir;
+        }
+        catch { }
+    }
 
     /// <summary>Running token totals for one transcript. Weights are applied per request, at
     /// the ratios of the model that served it — see <see cref="TokenUsage"/>.</summary>

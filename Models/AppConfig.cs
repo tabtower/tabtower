@@ -232,6 +232,10 @@ public class SessionConfig
     /// <summary>The other type half, for background jobs. Persisted for the same reason as the
     /// monitor ids and refilled by the same scan.</summary>
     public List<string> JobTaskIds { get; set; } = new();
+    /// <summary>The Workflow teams still running when the deck was last saved (see
+    /// SessionViewModel.LiveWorkflowIds). Persisted because a session waiting on one is silent
+    /// until it ends; the next Stop overwrites it.</summary>
+    public List<string> LiveWorkflowIds { get; set; } = new();
     /// <summary>Which VSCode instance this session was last SEEN running in — the id of the
     /// <see cref="SessionGroupConfig"/> whose window held its tab. "" while unknown.
     ///
@@ -454,6 +458,13 @@ public class AppConfig
     /// window focused last. Never seeded: the list holds only what is written in
     /// config.json.</summary>
     public List<SessionGroupConfig> SessionGroups { get; set; } = new();
+    /// <summary>Whether the session groups pick the instance for EVERY task, not only for
+    /// tasks whose folder the groups are pinned to. On: the held modifier picks a group out of
+    /// all of them (the plain click picks the no-modifier one) and the task opens in that
+    /// group's folder even when the task names another, and Shift opens it in the task's own
+    /// folder instead. Off (the default): a task opens in its own folder, and a modifier picks
+    /// a group only when that folder has groups.</summary>
+    public bool TasksFollowGroups { get; set; }
     /// <summary>
     /// How long each tool may sit without a result before the deck reads it as an open
     /// permission dialog (issue 2026-07-20). The VSCode extension fires no Notification

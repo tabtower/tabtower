@@ -206,8 +206,8 @@ public partial class MainWindow
         bool requested = fast;
         bool honored = requested && FastTemplateFor(task) != null;
         // A group named in the Run box wins over the keys, because it was typed on purpose;
-        // with neither, the card's no-modifier group (if it has one) is what a plain click means.
-        group ??= GroupForTask(task);
+        // otherwise the keys held right now decide (TaskTarget).
+        var target = TaskTarget(task, group);
 
         if (!task.HasTarget)
         {
@@ -216,7 +216,7 @@ public partial class MainWindow
         }
         if (task.Sessions.Count == 0)
         {
-            StartTaskNewSession(task, honored, group);
+            StartTaskNewSession(task, honored, target.Path, target.Group);
             WarnIfFastIgnored(task, requested, honored);
             return;
         }
@@ -224,15 +224,21 @@ public partial class MainWindow
         // LTR menu with English items; each item's own direction still follows its header
         // (App.xaml MenuItem style), so a Hebrew session title renders RTL inside it.
         var menu = new ContextMenu();
-        string groupSuffix = group == null ? "" : $" · {group.Name}";
+        string groupSuffix = target.Group == null ? "" : $" · {target.Group.Name}";
         var newItem = new MenuItem
         {
             Header = (honored ? "+ New session (fast)" : "+ New session") + groupSuffix,
         };
         // The modifier counts whether it was held when the menu opened or when the item is
         // picked: the menu is a pause in the middle of one gesture, and either end of it
-        // states the intent.
-        newItem.Click += (_, _) => StartTaskNewSession(task, honored, GroupForTask(task) ?? group);
+        // states the intent. Keys held at the pick win; none held keeps the choice made when
+        // the menu opened (a plain pick used to re-resolve to the no-modifier group and drop
+        // a Ctrl held at the open).
+        newItem.Click += (_, _) =>
+        {
+            var at = Keyboard.Modifiers != ModifierKeys.None ? TaskTarget(task, group) : target;
+            StartTaskNewSession(task, honored, at.Path, at.Group);
+        };
         newItem.IsEnabled = task.HasWorkspace;
         menu.Items.Add(newItem);
         menu.Items.Add(new Separator());
@@ -353,8 +359,36 @@ public partial class MainWindow
         => task.HasWorkspace && Vm.FindByPath(task.WorkspacePath) is { } ws
                ? GroupForModifiers(ws) : null;
 
-    private void StartTaskNewSession(TaskItemViewModel task, bool fast = false,
-                                     SessionGroupConfig? group = null)
+    /// <summary>Where a NEW session for this task opens: the folder, and the group in it.
+    ///
+    /// A group typed in the Run box wins, and opens in that group's own folder - it used to be
+    /// looked for in the TASK's folder, where a group pinned elsewhere never connects, so the
+    /// request was parked under a promise ("will start there when it is") and dropped in
+    /// silence three minutes later.
+    ///
+    /// With TasksFollowGroups on, the held keys pick out of ALL the groups and the task opens
+    /// in that group's folder whatever folder the task names: the instances behind the groups
+    /// are where the user wants task work done, and the session reaches the task's own folder
+    /// from there. Shift is the way back to the task's own folder, on its plain group if it has
+    /// one. Off, the keys pick a group only in a folder that has groups, as before.</summary>
+    private (string Path, SessionGroupConfig? Group) TaskTarget(TaskItemViewModel task,
+                                                                SessionGroupConfig? typed)
+    {
+        string own = task.WorkspacePath;
+        if (typed != null) return (typed.WorkspacePath.Length > 0 ? typed.WorkspacePath : own, typed);
+        if (!_tasksFollowGroups) return (own, GroupForTask(task));
+        string held = HeldModifierName();
+        if (held == "shift")
+            return (own, task.HasWorkspace && Vm.FindByPath(own) is { } ws
+                             ? GroupsFor(ws).FirstOrDefault(g => NormalizeModifier(g.Modifier).Length == 0)
+                             : null);
+        var group = _sessionGroups.FirstOrDefault(g => g.Id.Length > 0 && NormalizeModifier(g.Modifier) == held);
+        if (group == null) return (own, GroupForTask(task));
+        return (group.WorkspacePath.Length > 0 ? group.WorkspacePath : own, group);
+    }
+
+    private void StartTaskNewSession(TaskItemViewModel task, bool fast, string path,
+                                     SessionGroupConfig? group)
     {
         if (!task.HasWorkspace)
         {
@@ -362,9 +396,23 @@ public partial class MainWindow
             return;
         }
         string? prompt = BuildNewSessionPrompt(task, fast);
-        if (Vm.FindByPath(task.WorkspacePath) is { } ws)
+        bool away = WorkspaceMetadata.NormalizePath(path) != WorkspaceMetadata.NormalizePath(task.WorkspacePath);
+        if (Vm.FindByPath(path) is { } ws)
         {
+            if (away)
+                LogService.Info("tasks", $"task {task.Id} opens in \"{ws.DisplayTitle}\"" +
+                                         (group != null ? $" ({group.Id})" : "") +
+                                         $", not its own folder \"{task.WorkspacePath}\"");
             NewSessionInVscode(ws, prompt, group);
+            return;
+        }
+        // A group's instance is started by its own launcher, never by a plain VSCode launch,
+        // which would open the folder on the wrong configuration. Without the group's card
+        // there is nothing to aim the session at.
+        if (away)
+        {
+            SetStatus($"\"{task.Name}\" — {group?.Name ?? path}: that folder has no card on the deck, nothing opened");
+            LogService.Info("tasks", $"task {task.Id} not opened: \"{path}\" has no card");
             return;
         }
         if (!Directory.Exists(task.WorkspacePath))

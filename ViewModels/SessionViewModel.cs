@@ -508,6 +508,47 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
         }
     }
 
+    private IReadOnlyList<string> _liveWorkflowIds = Array.Empty<string>();
+    /// <summary>The Workflow teams this session has out: the ids the Stop hook lists as
+    /// <c>type=workflow</c>, plus any launched since (PostToolUse on the Workflow call). The
+    /// next Stop overwrites the list, empty included. Non-empty holds the turn exactly as
+    /// background agents do, because a workflow wakes its session when it finishes.
+    ///
+    /// PERSISTED, for the reason <see cref="LiveTaskIds"/> is: a session waiting on a workflow
+    /// emits no hook until it ends, so a restart would have nothing to refill this from.</summary>
+    public IReadOnlyList<string> LiveWorkflowIds
+    {
+        get => _liveWorkflowIds;
+        set
+        {
+            if (_liveWorkflowIds.SequenceEqual(value)) return;
+            _liveWorkflowIds = value;
+            Raise();
+        }
+    }
+
+    /// <summary>Workflow task id (and run id) → the run's transcript dir, from the transcript
+    /// (see TranscriptInfo.WorkflowRuns). Runtime only: every scan re-reads it.</summary>
+    public IReadOnlyDictionary<string, string> WorkflowRuns { get; set; } =
+        new Dictionary<string, string>();
+
+    private int _workflowAgents;
+    /// <summary>Agents alive inside this session's live Workflow teams, read from each run's
+    /// journal on the metadata tick (see WorkflowJournal). The only count here that is POLLED:
+    /// a workflow's own agents never wake the session, so no hook fires as they come and go.
+    /// Not persisted, recomputed on every tick.</summary>
+    public int WorkflowAgents
+    {
+        get => _workflowAgents;
+        set
+        {
+            if (_workflowAgents == value) return;
+            _workflowAgents = value;
+            Raise();
+            RaiseAgentChip();
+        }
+    }
+
     private void RaiseAgentChip()
     {
         Raise(nameof(AgentsRunning));
@@ -571,15 +612,25 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
     /// alone. The card's own colour already separates them — blue means the turn is still open
     /// and the agents are foreground, purple means the turn ended and only background ones can
     /// still be out — so a second glyph would split a distinction the border already
-    /// draws.</summary>
-    public int AgentsRunning => _backgroundAgents + _foregroundAgents;
+    /// draws.
+    ///
+    /// Agents inside a Workflow team join the same 🤖 for the same reason: from the user's side
+    /// they are this session's agents, out, coming back on their own (asked for 04-10-2026, "a
+    /// count of the agents out there, as with ordinary agents").</summary>
+    public int AgentsRunning => _backgroundAgents + _foregroundAgents + _workflowAgents;
 
     public bool HasAgents => AgentsRunning > 0;
 
     /// <summary>The chip on the card: the icon alone for one, icon + count for more.</summary>
     public string AgentsText => AgentsRunning > 1 ? $"🤖{AgentsRunning}" : "🤖";
 
-    public string AgentsTip => _backgroundAgents > 0 && _foregroundAgents > 0
+    public string AgentsTip => _workflowAgents > 0
+        ? _workflowAgents == AgentsRunning
+            ? _workflowAgents == 1
+                ? "1 agent is running in a workflow team — the session resumes on its own when the team finishes"
+                : $"{_workflowAgents} agents are running in a workflow team — the session resumes on its own when the team finishes"
+            : $"{AgentsRunning} agents are still running ({_workflowAgents} in a workflow team, {_backgroundAgents + _foregroundAgents} subagents) — the session comes back on its own"
+        : _backgroundAgents > 0 && _foregroundAgents > 0
         ? $"{AgentsRunning} subagents are still running ({_foregroundAgents} holding the turn, {_backgroundAgents} in the background) — the session comes back on its own"
         : _foregroundAgents > 0
             ? _foregroundAgents == 1

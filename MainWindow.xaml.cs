@@ -51,6 +51,7 @@ public partial class MainWindow : Window
     private string _badgesFile = "";
     private List<string> _fastWords = new();
     private List<SessionGroupConfig> _sessionGroups = new();
+    private bool _tasksFollowGroups;
 
     // Live VSCode-extension connections (stage D). UI thread only (handlers are dispatched).
     private readonly List<VscodeConnection> _connectors = new();
@@ -169,6 +170,7 @@ public partial class MainWindow : Window
         // Session groups are the user's own, from config.json; none are seeded. Schemas 5, 6
         // and 8 once seeded and adjusted one particular setup and are deliberately empty now.
         _sessionGroups = config.SessionGroups;
+        _tasksFollowGroups = config.TasksFollowGroups;
         _badgesFile = config.BadgesFile;
         _fastWords = config.FastWords;
         // Schema 7: the session card gained a chip naming the window it runs in, drawn in that
@@ -225,6 +227,7 @@ public partial class MainWindow : Window
                     LiveTaskIds = sc.LiveTaskIds,
                     MonitorTaskIds = sc.MonitorTaskIds,
                     JobTaskIds = sc.JobTaskIds,
+                    LiveWorkflowIds = sc.LiveWorkflowIds,
                     // Which window it ran in. Restored before any connector is up, because a
                     // deck restarted after the instance died is exactly when it is asked.
                     GroupId = sc.GroupId,
@@ -258,7 +261,11 @@ public partial class MainWindow : Window
                 // grey on restart while four verification agents were running under it
                 // (measured 11-09-2026). The transcript is the only witness, so ask it
                 // - for these few candidates only, not for every restored session.
+                // ...and a session waiting on a Workflow team is the background case once more:
+                // its agents write into the run's own folder and the session hears nothing until
+                // the team finishes.
                 if (svm.Status == SessionStatus.Working && !svm.Closed && svm.BackgroundAgents == 0 &&
+                    svm.LiveWorkflowIds.Count == 0 &&
                     !TranscriptActiveWithin(svm, RecentTranscriptActivity) &&
                     !HasLiveForegroundAgent(svm))
                 {
@@ -427,6 +434,7 @@ public partial class MainWindow : Window
             TasksFilePath = Vm.TasksFilePath,
             CustomToggles = _customToggleConfigs,
             SessionGroups = _sessionGroups,
+            TasksFollowGroups = _tasksFollowGroups,
             BadgesFile = _badgesFile,
             FastWords = _fastWords,
             Zone = new ZoneConfig { Monitor = Vm.ZoneMonitor, Mode = ModeNames.ToName(Vm.ZoneMode), Size = Vm.ZoneSize },
@@ -481,6 +489,7 @@ public partial class MainWindow : Window
                     LiveTaskIds = s.LiveTaskIds.ToList(),
                     MonitorTaskIds = s.MonitorTaskIds.ToList(),
                     JobTaskIds = s.JobTaskIds.ToList(),
+                    LiveWorkflowIds = s.LiveWorkflowIds.ToList(),
                     GroupId = s.GroupId,
                     LastMessageAtUtc = s.LastMessageAtUtc,
                 });
@@ -613,6 +622,7 @@ public partial class MainWindow : Window
         foreach (var ws in Vm.Workspaces)
             RefreshMetadata(ws);
         RefreshTranscriptTitles();
+        RefreshWorkflowAgents();
         RefreshPhantomSessions();
         // Re-correlate before sweeping. The sweep now reads ws.UnexplainedTabs, which this is
         // what computes, and it must be this tick's answer rather than whenever the last
@@ -1204,6 +1214,9 @@ public partial class MainWindow : Window
                         // from the config at the one moment it is read — the restart.
                         changed = true;
                     }
+                    // Which folder each Workflow run of this session writes to. Assigned whole,
+                    // like the monitor ids: the transcript holds every launch.
+                    if (tInfo.WorkflowRuns is { } runs) session.WorkflowRuns = runs;
                     if (ApplyLostAgents(session, tInfo.Lost)) changed = true;
                     // The transcript names its host as well. The hook's CLAUDE_CODE_ENTRYPOINT
                     // stays the primary source; this only fills a session the hook never
@@ -1219,6 +1232,8 @@ public partial class MainWindow : Window
                         changed = true;
                     }
                 }
+                // A launch the scan just tied to its folder is counted now, not a tick later.
+                RefreshWorkflowAgents();
                 // Evaluate right after a scan too, so a question goes orange at once
                 // instead of waiting for the next tick.
                 if (EvaluateAllPendingWaits()) changed = true;
@@ -1991,7 +2006,8 @@ public partial class MainWindow : Window
                                   int? Agents = null, string? Entrypoint = null,
                                   bool PrintMode = false, string? Dispatcher = null,
                                   string? Group = null, IReadOnlyList<string>? TaskIds = null,
-                                  int? Pid = null, string? ConfigDir = null)
+                                  int? Pid = null, string? ConfigDir = null,
+                                  IReadOnlyList<string>? WorkflowIds = null)
     {
         public static readonly HookInfo Empty = new();
     }
@@ -2067,6 +2083,8 @@ public partial class MainWindow : Window
                 // notification about them is written a few seconds AFTER this hook.
                 fs.BackgroundAgents = 0;
                 fs.ForegroundAgents = 0;
+                fs.LiveWorkflowIds = Array.Empty<string>();
+                fs.WorkflowAgents = 0;
                 fs.ClearLostAgents();
                 // And nothing the old incarnation's processes said still applies, including
                 // which of them was speaking. A `resume` deliberately keeps them: that is the
@@ -2139,6 +2157,12 @@ public partial class MainWindow : Window
         // Never counted as agents and never shown raw — only intersected with the Monitor ids
         // the transcript knows about (SessionViewModel.ActiveWatches).
         if (info.TaskIds is { } taskIds) session.LiveTaskIds = taskIds;
+        if (info.WorkflowIds is { } workflowIds)
+        {
+            session.LiveWorkflowIds = workflowIds;
+            // The agent count follows on the next tick; with no team left there is nothing to read.
+            if (workflowIds.Count == 0) session.WorkflowAgents = 0;
+        }
         if (info.Entrypoint != null) session.Entrypoint = info.Entrypoint;
         // One-way: proven once at SessionStart, and no later event can argue with it.
         if (info.PrintMode) session.PrintMode = true;
@@ -2272,6 +2296,74 @@ public partial class MainWindow : Window
         return ($"session {sessionId}: {session.BackgroundAgents} background agents", true);
     }
 
+    /// <summary>A Workflow team was just launched (PostToolUse on a Workflow call that answered
+    /// `async_launched`): the same leading edge as NoteAgentLaunched, for the same reason. The
+    /// id joins the live list at once; how many agents it runs is read from its journal on the
+    /// next tick (RefreshWorkflowAgents), and the next Stop replaces the list with the snapshot.
+    /// Status is untouched: this fires mid-turn.</summary>
+    public (string, bool) NoteWorkflowLaunched(string sessionId, string taskId, HookInfo info)
+    {
+        if (Vm.FindSession(sessionId) is not { } found)
+            return ($"unknown session id {sessionId}", false);
+        var (ws, session) = found;
+        if (!session.LiveWorkflowIds.Contains(taskId))
+            session.LiveWorkflowIds = session.LiveWorkflowIds.Append(taskId).ToList();
+        ApplyHookInfo(session, info);
+        LearnTranscriptDir(ws, info);
+        QueueSave();
+        LogService.Info("status", $"session={sessionId} workflow team launched (task {taskId}, " +
+                                  $"{session.LiveWorkflowIds.Count} out) ws=\"{ws.DisplayTitle}\"");
+        return ($"session {sessionId}: {session.LiveWorkflowIds.Count} workflow teams", true);
+    }
+
+    private bool _workflowScanRunning;
+
+    /// <summary>Recount, for every session with a Workflow team out, how many of its agents are
+    /// alive, from each run's journal (see WorkflowJournal). Polled on the metadata tick and after
+    /// each transcript scan, because nothing else can report it: the team's agents never wake the
+    /// session, so no hook fires while they come and go. A team the transcript has not yet tied
+    /// to a folder counts nothing until it does, and so does an unreadable journal: the card
+    /// still holds the turn through LiveWorkflowIds, it just shows no number.</summary>
+    private void RefreshWorkflowAgents()
+    {
+        if (_workflowScanRunning) return;
+        var work = new List<(SessionViewModel Session, List<string> Dirs)>();
+        foreach (var ws in Vm.Workspaces)
+        foreach (var s in ws.Sessions)
+        {
+            // A closed session's last Stop may never come, so its list is not evidence of anything.
+            if (s.LiveWorkflowIds.Count == 0 || s.Closed)
+            {
+                s.WorkflowAgents = 0;
+                continue;
+            }
+            var dirs = s.LiveWorkflowIds
+                .Select(id => s.WorkflowRuns.GetValueOrDefault(id))
+                .OfType<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            work.Add((s, dirs));
+        }
+        if (work.Count == 0) return;
+
+        _workflowScanRunning = true;
+        Task.Run(() =>
+        {
+            var counts = work.Select(w => (w.Session, Live: w.Dirs.Sum(d => WorkflowJournal.CountLive(d) ?? 0))).ToList();
+            Dispatcher.BeginInvoke(() =>
+            {
+                _workflowScanRunning = false;
+                foreach (var (session, live) in counts)
+                {
+                    if (session.WorkflowAgents == live) continue;
+                    LogService.Info("status", $"session={session.SessionId} " +
+                        $"workflow agents {session.WorkflowAgents}→{live} (journal)");
+                    session.WorkflowAgents = live;
+                }
+            });
+        });
+    }
+
     public (string, bool) SetSessionStatus(string sessionId, SessionStatus status, string workspaceArg, HookInfo info)
     {
         // A turn that ended while background subagents are still running is not the user's
@@ -2281,11 +2373,16 @@ public partial class MainWindow : Window
         // says what is true instead: the session is working, just not by itself. The hook
         // counts subagents only; a background shell never wakes anything. Ahead of the
         // recreate branch on purpose — a session the deck has forgotten gets the same read.
-        bool agentsHeldTurn = status == SessionStatus.Done && info.Agents > 0;
+        // A Workflow team holds it the same way: it is one background task however many agents
+        // it runs, and it wakes the session when it finishes (measured 04-10-2026: without this a
+        // 3-agent run left the card purple "your turn" for its whole six minutes).
+        int workflows = info.WorkflowIds?.Count ?? 0;
+        bool agentsHeldTurn = status == SessionStatus.Done && (info.Agents > 0 || workflows > 0);
         if (agentsHeldTurn)
         {
             status = SessionStatus.Working;
-            LogService.Info("status", $"session={sessionId} done→working ({info.Agents} background agents)");
+            LogService.Info("status", $"session={sessionId} done→working ({info.Agents ?? 0} background agents" +
+                                      (workflows > 0 ? $", {workflows} workflow teams)" : ")"));
         }
         if (Vm.FindSession(sessionId) is not { } found)
         {

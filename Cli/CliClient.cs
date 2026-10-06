@@ -99,12 +99,16 @@ public static class CliClient
         tabtower session status --id <sid> --state working|waiting|done|wrapped|replaced|error|idle [--detail "..."]
                                    [--agents <n>]  subagents still running in the background; a
                                                    done with n>0 lands on working, not "your turn"
+                                   [--workflows <ids>]  Workflow teams still running; they hold the
+                                                   turn too, and the 🤖 chip counts their live agents
                                    wrapped  = closed out for good by its end-of-session routine (no hook sets it)
                                    replaced = handed off to a successor and its process was killed;
                                               the card is swept as soon as its dead tab is closed
         tabtower session agents --id <sid> --launched   one background subagent was just
                                                    dispatched; +1 to the card's 🤖 chip until
                                                    the next Stop replaces it with the snapshot
+        tabtower session agents --id <sid> --workflow <task_id>   a Workflow team was just
+                                                   launched; its live agents join the 🤖 chip
         tabtower session end    --id <sid> [--reason <r>]
         tabtower session open   --id <sid>          focus VSCode + open/resume the session's tab
         tabtower session new    <target> [--prompt "..."] [--group <id>] [--after <sid>] [--no-focus]

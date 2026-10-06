@@ -124,7 +124,7 @@
                 </StackPanel.Resources>
                 <Button x:Name="TargetButton" Content="{Binding TargetButtonText}"
                         Click="Target_Click"
-                        ToolTip="Open a session for this task — an existing one, or a new one in its workspace">
+                        ToolTip="Open a session for this task — an existing one, or a new one in its workspace. A held modifier picks the session group; with TasksFollowGroups on, Shift keeps the task in its own folder">
                     <Button.Style>
                         <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                             <Style.Triggers>

@@ -1,5 +1,5 @@
 ﻿# TabTower hook bridge for Claude Code.
-# Version: 0.11.5  (parsed by install.ps1 — keep in sync with TabTower.csproj; release.ps1 syncs automatically)
+# Version: 0.11.9  (parsed by install.ps1 — keep in sync with TabTower.csproj; release.ps1 syncs automatically)
 # Called by Claude Code hooks with the event name as argument; the hook payload
 # (session_id, cwd, transcript_path, permission_mode + event-specific fields)
 # arrives as JSON on stdin. Everything the payload provides is forwarded to
@@ -148,6 +148,16 @@ switch ($HookEvent) {
         # comma survives the call and parses to zero ids (RemoveEmptyEntries), which is what
         # this line always meant to send.
         $cliArgs += @('--tasks', (($shells -join ',') + ','))
+        # A Workflow team is ONE entry here (type=workflow, plus its name) however many agents it
+        # runs, and none of them is a 'subagent' entry (measured 04-10-2026: a 3-agent run ended
+        # its turn as a plain done). It wakes the session when it finishes, exactly like a
+        # subagent, so it holds the turn the same way - the deck reads how many of its agents are
+        # alive from the run's own journal, which nothing in this payload carries. Same trailing
+        # comma as --tasks, for the same reason.
+        $workflows = @($payload.background_tasks |
+                       Where-Object { $_.type -eq 'workflow' -and $_.id } |
+                       ForEach-Object { $_.id })
+        $cliArgs += @('--workflows', (($workflows -join ',') + ','))
     }
     # The turn died on an API error. Until this event existed TabTower had no hook for
     # its 'error' state at all and the card just went quiet.
@@ -191,6 +201,14 @@ switch ($HookEvent) {
         if ($payload.tool_name -eq 'Agent') {
             if ($payload.tool_response.status -ne 'async_launched') { exit 0 }
             $cliArgs = @('session', 'agents', '--id', $sid, '--launched')
+        }
+        # The same leading edge for a Workflow team: it answers at once with async_launched and
+        # its task id, and the turn may run on for minutes before Stop lists it.
+        elseif ($payload.tool_name -eq 'Workflow') {
+            if ($payload.tool_response.status -ne 'async_launched') { exit 0 }
+            $taskId = $payload.tool_response.taskId
+            if (-not $taskId) { exit 0 }
+            $cliArgs = @('session', 'agents', '--id', $sid, '--workflow', $taskId)
         }
         elseif ($payload.tool_name -in @('AskUserQuestion', 'ExitPlanMode')) {
             $cliArgs = @('session', 'status', '--id', $sid, '--state', 'working')

@@ -70,6 +70,12 @@ it to place each running session in its instance. `tabtower groups` prints every
 state. No groups are configured by default, and with none, or on a card no group names, nothing
 changes.
 
+Tasks follow the same rule: a task opens in its own folder, and a modifier picks a group only
+when that folder has groups. Set `TasksFollowGroups` to `true` to aim every task at the groups
+instead - the held modifier (none included) opens the task in that group's folder whatever
+folder the task names, so task work always runs in the instance you chose, and Shift opens it
+in the task's own folder. A group typed in the Run box always opens in that group's folder.
+
 ### Toolbar toggles
 
 Toggles are flags for *your* processes. Each one is a toolbar button whose 1/0 state is written to a file any script can read, so you can gate a watcher, a deploy or a hook on a click. TabTower neither knows nor cares what a toggle drives.
