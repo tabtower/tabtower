@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Windows;
 using TabTower.Models;
 using TabTower.Services;
 
@@ -231,6 +232,15 @@ public sealed class TasksPanelViewModel : INotifyPropertyChanged
             var item = TaskItemViewModel.From(entry, doc.StatusColors);
             (item.Pinned ? _allPinned : _allOther).Add(item);
         }
+        // One side for every name in the list, never one per title: a list that mixed a
+        // right-aligned and a left-aligned name does not line up when it is scanned (the
+        // decision of 06-08-2026). Any right-to-left letter in ANY loaded title keeps the
+        // whole list on the fixed right-aligned header; only a list with none at all is drawn
+        // left-aligned. Decided here, on everything the file holds, and not in Rebuild, so a
+        // search that hides some cards can never flip the ones still showing.
+        var nameFlow = AllTasks.Any(t => FlowDirectionConverter.ContainsRtl(t.Name))
+            ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
+        foreach (var t in AllTasks) t.NameFlow = nameFlow;
         Rebuild();
         ApplyNav(doc);
         WarningText = result.RecordWarnings.Count == 0 ? ""

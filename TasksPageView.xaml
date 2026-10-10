@@ -225,7 +225,10 @@
                 </ScrollViewer.Style>
                 <!-- 700 before the navigation grid took the right edge: the grid
                      needs about 90px and only ~68 were free at 700. -->
-                <StackPanel Margin="14,8" MaxWidth="650">
+                <!-- The size scope of the task cards' id-and-status column: in a list drawn
+                     left-aligned that column takes one width, pinned cards included, so the
+                     names line up (TaskItemView.xaml). A right-aligned list does not use it. -->
+                <StackPanel Margin="14,8" MaxWidth="650" Grid.IsSharedSizeScope="True">
                     <ItemsControl ItemsSource="{Binding TasksPanel.PinnedTasks}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>

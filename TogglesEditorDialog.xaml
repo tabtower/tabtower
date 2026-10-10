@@ -157,7 +157,7 @@
                 <TextBox x:Name="DetailsSnippet" Style="{StaticResource ValueBox}"/>
             </DockPanel>
 
-            <TextBlock Text="Prompt for an AI agent — a description of the flag, to paste at an agent that will wire a process to it" FontSize="11"
+            <TextBlock Text="Prompt for an AI agent: a description of the flag, to paste at an agent that will wire a process to it" FontSize="11"
                        Foreground="#FF999999" TextWrapping="Wrap"/>
             <DockPanel Margin="0,2,0,10">
                 <Button DockPanel.Dock="Right" Style="{StaticResource CopyButton}" Click="CopyPrompt_Click"/>

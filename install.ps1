@@ -48,6 +48,95 @@ function Get-Sha256([string]$Path) {
     finally { $stream.Dispose(); $sha.Dispose() }
 }
 
+# One entry of the user PATH, added or removed in the registry value itself.
+#
+# Not [Environment]::GetEnvironmentVariable / SetEnvironmentVariable: the getter hands the value
+# back with every %VARIABLE% already expanded and the setter writes a plain string. One round
+# trip through them froze every %USERPROFILE%-style entry into a literal path and changed the
+# value's type from REG_EXPAND_SZ to REG_SZ (measured on a first install of 0.11.17). Here the
+# text is read unexpanded, only the one entry is touched, every other character is written back
+# as it was found, and so is the type.
+#
+# Returns 'added', 'present', 'removed', 'absent' or 'unsupported' (the value exists but is not
+# a text type, and is left alone). Only 'added' and 'removed' write anything.
+# -SubKey exists for tests\user-path.tests.ps1, which aims it at a scratch key.
+# Keep this function identical in install.ps1 and uninstall.ps1; that test compares the two.
+function Edit-UserPath {
+    param(
+        [Parameter(Mandatory)][string]$Entry,
+        [switch]$Remove,
+        [string]$SubKey = 'Environment'
+    )
+    $hkcu = [Microsoft.Win32.Registry]::CurrentUser
+    $key = $hkcu.OpenSubKey($SubKey, $true)
+    if (-not $key) {
+        if ($Remove) { return 'absent' }
+        $key = $hkcu.CreateSubKey($SubKey)
+    }
+    try {
+        # What Windows itself uses for a user Path; only used when there is no value yet.
+        $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+        $raw = ''
+        if ($key.GetValueNames() -contains 'Path') {
+            $kind = $key.GetValueKind('Path')
+            $textKinds = [Microsoft.Win32.RegistryValueKind]::String, [Microsoft.Win32.RegistryValueKind]::ExpandString
+            if ($textKinds -notcontains $kind) { return 'unsupported' }
+            $raw = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        } elseif ($Remove) {
+            return 'absent'
+        }
+
+        # An entry is ours when it names the same folder: case, a trailing backslash and
+        # surrounding quotes aside, and after expansion where Windows would expand it too.
+        $want = $Entry.Trim().Trim('"').TrimEnd('\')
+        $kept = New-Object System.Collections.Generic.List[string]
+        $found = $false
+        foreach ($part in @(if ($raw.Length -gt 0) { $raw.Split(';') })) {
+            $text = $part.Trim().Trim('"')
+            if ($kind -eq [Microsoft.Win32.RegistryValueKind]::ExpandString) {
+                $text = [Environment]::ExpandEnvironmentVariables($text)
+            }
+            if ($text.Length -gt 0 -and $text.TrimEnd('\') -ieq $want) { $found = $true } else { $kept.Add($part) }
+        }
+
+        if ($Remove) {
+            if (-not $found) { return 'absent' }
+            $key.SetValue('Path', ($kept -join ';'), $kind)
+            return 'removed'
+        }
+        if ($found) { return 'present' }
+        # A value that ends with a separator keeps ending with one, so that removing the entry
+        # again gives back exactly the text that was there before.
+        $new = if ($raw.Length -eq 0) { $Entry } elseif ($raw.EndsWith(';')) { $raw + $Entry + ';' } else { $raw + ';' + $Entry }
+        $key.SetValue('Path', $new, $kind)
+        return 'added'
+    } finally {
+        $key.Dispose()
+    }
+}
+
+# Tells running programs (Explorer first of all) that the user environment changed, so a
+# terminal opened afterwards has the new PATH without a sign-out. .NET's SetEnvironmentVariable
+# sent this as a side effect; a registry write does not. Failing to send it is not an error:
+# the PATH is already written and takes effect at the next sign-in.
+# Keep this function identical in install.ps1 and uninstall.ps1 as well.
+function Send-EnvironmentChanged {
+    param([IntPtr]$Window = [IntPtr]0xffff)   # HWND_BROADCAST: every top-level window
+    try {
+        if (-not ('TabTowerSetup.User32' -as [type])) {
+            Add-Type -Namespace TabTowerSetup -Name User32 -MemberDefinition @'
+[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+'@
+        }
+        $result = [UIntPtr]::Zero
+        # 0x1A = WM_SETTINGCHANGE, 2 = SMTO_ABORTIFHUNG, at most one second per window.
+        [void][TabTowerSetup.User32]::SendMessageTimeout($Window, 0x1A, [UIntPtr]::Zero, 'Environment', 2, 1000, [ref]$result)
+    } catch {
+        Write-Warning "Could not tell running programs about the PATH change ($($_.Exception.Message)). It takes effect at your next sign-in."
+    }
+}
+
 if (-not (Test-Path (Join-Path $src 'TabTower.exe'))) {
     Write-Error "TabTower.exe not found next to install.ps1 - run this script from the extracted release zip."
 }
@@ -87,14 +176,10 @@ if (Get-Process $legacyName -ErrorAction SilentlyContinue) {
     Get-Process $legacyName -ErrorAction SilentlyContinue | Stop-Process -Force
 }
 $legacyPathStatus = $null
-$userPathNow = [Environment]::GetEnvironmentVariable('Path', 'User')
-if ($userPathNow) {
-    $entries = $userPathNow -split ';'
-    $kept = $entries | Where-Object { $_ -and ($_.TrimEnd('\') -ine $legacyDir.TrimEnd('\')) }
-    if (@($kept).Count -ne @($entries | Where-Object { $_ }).Count) {
-        [Environment]::SetEnvironmentVariable('Path', ($kept -join ';'), 'User')
-        $legacyPathStatus = "removed $legacyDir from the user PATH"
-    }
+$pathChanged = $false
+if ((Edit-UserPath -Entry $legacyDir -Remove) -eq 'removed') {
+    $legacyPathStatus = "removed $legacyDir from the user PATH"
+    $pathChanged = $true
 }
 
 # --- 2. Copy the zip content to the install dir ---
@@ -143,17 +228,17 @@ if ($resolvedSrc -ieq $resolvedDst) {
 }
 $exe = Join-Path $InstallDir 'TabTower.exe'
 
-# --- 3. Add the install dir to the user PATH (no-op if already there) ---
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if (-not $userPath) { $userPath = '' }
-$onPath = ($userPath -split ';') | Where-Object { $_ -and ($_.TrimEnd('\') -ieq $InstallDir.TrimEnd('\')) }
-if ($onPath) {
-    $pathStatus = 'already on the user PATH'
-} else {
-    $newPath = if ($userPath) { $userPath.TrimEnd(';') + ';' + $InstallDir } else { $InstallDir }
-    [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-    $pathStatus = 'added to the user PATH (open a new terminal to pick it up)'
+# --- 3. Add the install dir to the user PATH (no-op if already there; the rest of the value,
+#        and its registry type, stay exactly as they were: see Edit-UserPath) ---
+switch (Edit-UserPath -Entry $InstallDir) {
+    'added'   { $pathStatus = 'added to the user PATH (open a new terminal to pick it up)'; $pathChanged = $true }
+    'present' { $pathStatus = 'already on the user PATH' }
+    default {
+        $pathStatus = 'NOT added: the user PATH in the registry is not a text value, so it was left untouched'
+        Write-Warning "The user PATH (HKCU\Environment, value Path) is not a text value. It was left untouched; add $InstallDir to it yourself if you want 'tabtower' on the command line."
+    }
 }
+if ($pathChanged) { Send-EnvironmentChanged }
 if (-not (($env:Path -split ';') | Where-Object { $_ -and ($_.TrimEnd('\') -ieq $InstallDir.TrimEnd('\')) })) {
     $env:Path += ';' + $InstallDir
 }
@@ -166,11 +251,11 @@ $vsix = Get-ChildItem -Path $src -Filter 'tabtower-connector-*.vsix' -ErrorActio
     Select-Object -Last 1
 $codeCmd = Get-Command code -ErrorAction SilentlyContinue
 if (-not $vsix) {
-    Write-Warning "No tabtower-connector-*.vsix found in the zip - skipping the VSCode extension."
+    Write-Warning "No tabtower-connector-*.vsix found in the zip - skipping the VS Code extension."
 } elseif (-not $codeCmd) {
-    Write-Warning "VSCode 'code' command not found on PATH - skipping the extension. Install it later with: code --install-extension `"$($vsix.FullName)`""
+    Write-Warning "VS Code 'code' command not found on PATH - skipping the extension. Install it later with: code --install-extension `"$($vsix.FullName)`""
 } else {
-    Write-Host "Installing the VSCode extension ($($vsix.Name))..."
+    Write-Host "Installing the VS Code extension ($($vsix.Name))..."
     # `code` writes Node's deprecation warnings to stderr. Under $ErrorActionPreference
     # 'Stop' PowerShell 5.1 turns a redirected stderr line into a terminating
     # NativeCommandError, so the installer died here - after copying the files, but

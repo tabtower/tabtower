@@ -13,13 +13,13 @@
             <TextBox x:Name="PathBox" FlowDirection="LeftToRight" TextChanged="Path_Changed"
                      Background="#FF333333" Foreground="White" BorderBrush="#FF555555" Padding="4,3"/>
         </DockPanel>
-        <TextBlock Text="Empty = the panel is off (the default). The file is read-only — TabTower never writes to it."
+        <TextBlock Text="Empty = the panel is off (the default). The file is read-only: TabTower never writes to it."
                    Foreground="#FF888888" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
         <TextBlock x:Name="PreviewText" Foreground="#FF7FB2E5" Margin="0,8,0,0" TextWrapping="Wrap"/>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
             <Button Content="📋 Copy spec" Click="CopySpec_Click" Padding="10,5" Margin="0,0,8,0"
                     Background="#FF3A3A3A" Foreground="White" BorderThickness="0"
-                    ToolTip="Copies the full file contract — structure, required/optional fields and an example — to the clipboard, ready to paste at whatever produces the file (a script, Claude, …)"/>
+                    ToolTip="Copies the full file contract (structure, required/optional fields and an example) to the clipboard, ready to paste at whatever produces the file (a script, Claude, …)"/>
             <Button x:Name="OkButton" Content="OK" Width="90" IsDefault="True" Click="Ok_Click" Margin="0,0,8,0"
                     Background="#FF3A6EA5" Foreground="White" BorderThickness="0" Padding="0,5"/>
             <Button Content="Cancel" Width="90" IsCancel="True"

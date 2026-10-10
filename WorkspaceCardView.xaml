@@ -295,7 +295,7 @@
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
                                             Margin="8,0,0,0">
                                     <TextBlock Text="📑" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}" Margin="0,0,6,0"
-                                               ToolTip="Open as a tab in VSCode">
+                                               ToolTip="Open as a tab in VS Code">
                                         <TextBlock.Style>
                                             <Style TargetType="TextBlock">
                                                 <Style.Triggers>
@@ -438,7 +438,7 @@
 
             <!-- inline task list: the 🗒 button toggles it; same card UI as the
                  tasks page. Docked after the sessions panel so it renders above it. -->
-            <StackPanel DockPanel.Dock="Bottom" Margin="8,0,8,2">
+            <StackPanel DockPanel.Dock="Bottom" Margin="8,0,8,2" Grid.IsSharedSizeScope="True">
                 <StackPanel.Style>
                     <Style TargetType="StackPanel">
                         <Style.Triggers>
@@ -514,9 +514,9 @@
                             </Style.Triggers>
                         </Style>
                     </StackPanel.Style>
-                    <TextBlock Text="🔌 No VSCode window open" Foreground="#FF888888" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=14}"
+                    <TextBlock Text="🔌 No VS Code window open" Foreground="#FF888888" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=14}"
                                HorizontalAlignment="Center"/>
-                    <TextBlock Text="Click to open the project in VSCode" Foreground="#FF555555" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}"
+                    <TextBlock Text="Click to open the project in VS Code" Foreground="#FF555555" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}"
                                HorizontalAlignment="Center" Margin="0,3,0,0"/>
                 </StackPanel>
             </Grid>

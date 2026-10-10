@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Test harness for the phone page. It compiles the app's own Services/Phone sources (linked,
+       not copied) against a fake deck, so the HTTP, auth and pairing code under test is exactly
+       the code that ships, without starting the app. See tests/phone.tests.ps1. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>PhoneHarness</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\..\Services\Phone\*.cs" Link="Phone\%(Filename)%(Extension)" />
+    <!-- The prompt-text rule behind what a card (and so the phone page) shows as its second line. -->
+    <Compile Include="..\..\..\Services\InjectedPrefix.cs" Link="InjectedPrefix.cs" />
+    <!-- The one wording for a permission dialog, whichever source reports it. -->
+    <Compile Include="..\..\..\Services\PermissionWait.cs" Link="PermissionWait.cs" />
+    <!-- What `session end` answers when it is asked to close the tab too, apart from the app that gathers its facts. -->
+    <Compile Include="..\..\..\Cli\SessionEndReply.cs" Link="SessionEndReply.cs" />
+    <EmbeddedResource Include="..\..\..\Services\Phone\Web\*.*" LogicalName="phone/%(Filename)%(Extension)" WithCulture="false" />
+  </ItemGroup>
+
+</Project>

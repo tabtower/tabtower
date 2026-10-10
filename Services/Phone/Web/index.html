@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="TabTower">
+<meta name="theme-color" content="#111418">
+<title>TabTower</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --text: #1b1f24; --muted: #6a737d; --line: #e3e6ea;
+    --accent: #2f6fde; --working: #2f6fde; --waiting: #e07b00; --done: #8a5cf6; --idle: #9aa3ad;
+    --error: #d23c3c; --wrapped: #1f9d55; --shade: rgba(0, 0, 0, .45);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --card: #1b2027; --text: #e8ebef; --muted: #96a0ab; --line: #2a313a;
+      --accent: #6aa0ff; --working: #6aa0ff; --waiting: #ffa53d; --done: #b99cf5; --idle: #6d7680;
+      --error: #ff6b6b; --wrapped: #3ccf7f; --shade: rgba(0, 0, 0, .6);
+    }
+  }
+  * { box-sizing: border-box; }
+  /* A row scrolled into view lands below the sticky header, not under it. */
+  html { scroll-padding-top: 150px; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.4 -apple-system, "Segoe UI", Arial, sans-serif;
+         padding: env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom)); }
+  header { position: sticky; top: 0; background: var(--bg); padding: 14px 0 10px; z-index: 2; }
+  h1 { margin: 0; font-size: 22px; display: flex; align-items: center; gap: 8px; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .chip { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); }
+  .chip b { font-weight: 600; }
+  .chip.waiting { border-color: var(--waiting); }
+  .banner { background: var(--card); border: 1px solid var(--waiting); border-radius: 12px; padding: 10px 12px; margin: 8px 0; font-size: 14px; }
+  .banner.err { border-color: var(--error); }
+  .card { background: var(--card); border: 1px solid var(--line); border-inline-start-width: 4px;
+          border-radius: 14px; margin: 12px 0; overflow: hidden; }
+  .card-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px; }
+  .ws-title { font-weight: 600; font-size: 17px; overflow-wrap: anywhere; text-align: start; }
+  .ws-path { color: var(--muted); font-size: 12px; direction: ltr; text-align: start; overflow-wrap: anywhere; unicode-bidi: plaintext; }
+  .btn { appearance: none; border: 0; border-radius: 10px; background: var(--accent); color: #fff;
+         font: inherit; font-size: 14px; font-weight: 600; padding: 8px 12px; white-space: nowrap; cursor: pointer; }
+  .btn:disabled { opacity: .5; }
+  .btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  .btn.danger { background: var(--error); }
+  .rows { border-top: 1px solid var(--line); }
+  .row { display: flex; align-items: center; gap: 8px; padding: 0 14px; border-top: 1px solid var(--line); }
+  .row:first-child { border-top: 0; }
+  .row-link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 10px 0; color: inherit; text-decoration: none; }
+  .end, .reopen { appearance: none; flex: none; border: 1px solid var(--line); border-radius: 10px; background: transparent;
+                  font: inherit; font-size: 13px; font-weight: 600; padding: 8px 10px; cursor: pointer; }
+  .end { color: var(--error); }
+  .reopen { color: var(--accent); }
+  .end:disabled, .reopen:disabled { opacity: .5; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--idle); }
+  .st-working .dot { background: var(--working); animation: pulse 1.6s infinite; }
+  .st-waiting .dot { background: var(--waiting); }
+  .st-done .dot { background: var(--done); }
+  .st-wrapped .dot { background: var(--wrapped); }
+  .st-error .dot { background: var(--error); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .r-main { flex: 1; min-width: 0; }
+  /* up to 3 lines, so a title is readable instead of cut at one line */
+  .r-title { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
+             overflow-wrap: anywhere; text-align: start; }
+  .r-meta { color: var(--muted); font-size: 12px; }
+  .st-waiting .r-meta { color: var(--waiting); font-weight: 600; }
+  .is-new .r-meta { color: var(--accent); font-weight: 600; }
+  .go { color: var(--accent); font-size: 13px; flex: none; }
+  .empty { color: var(--muted); font-size: 14px; padding: 10px 14px; border-top: 1px solid var(--line); }
+  .caption { color: var(--muted); font-size: 12px; padding: 0 14px 10px; }
+  .groups { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .toast { position: fixed; inset-inline: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); background: var(--text); color: var(--bg);
+           border-radius: 12px; padding: 12px 14px; font-size: 14px; display: none; z-index: 5; }
+  .toast a { color: inherit; font-weight: 700; }
+  /* While a toast shows, the page gets room below its last row, so nothing stays under it. */
+  body.toasting { padding-bottom: calc(140px + env(safe-area-inset-bottom)); }
+  .pair { text-align: center; padding: 18px 16px 22px; }
+  .pair h2 { margin: 4px 0 8px; font-size: 20px; }
+  .code { font: 700 40px/1.2 ui-monospace, Consolas, monospace; letter-spacing: .25em; direction: ltr; margin: 12px 0; }
+  .sheet { position: fixed; inset: 0; background: var(--shade); display: flex; align-items: flex-end; justify-content: center; z-index: 10; }
+  .sheet[hidden] { display: none; }
+  .sheet-box { background: var(--card); width: 100%; max-width: 520px; border-radius: 16px 16px 0 0;
+               padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); }
+  .sheet-title { font-weight: 700; font-size: 18px; margin-bottom: 6px; }
+  .sheet-text { color: var(--muted); font-size: 15px; overflow-wrap: anywhere; }
+  .sheet-actions { display: flex; gap: 10px; margin-top: 16px; }
+  .sheet-actions .btn { flex: 1; padding: 12px; font-size: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span data-i18n="app_title">TabTower</span>
+    <button class="btn ghost" id="refresh" style="margin-inline-start:auto" data-i18n="refresh" data-i18n-title="refresh_title">Refresh</button></h1>
+  <div class="sub" id="stamp"></div>
+  <div class="sub" id="summary"></div>
+  <div class="chips" id="chips"></div>
+</header>
+<div id="banner"></div>
+<section class="card pair" id="pair" hidden>
+  <h2 id="pair-title"></h2>
+  <div class="sheet-text" id="pair-text"></div>
+  <div class="sub" id="pair-code-label"></div>
+  <div class="code" id="pair-code"></div>
+  <div class="sub" id="pair-wait"></div>
+</section>
+<main id="list"></main>
+<section class="card" id="closed-card" hidden>
+  <div class="card-h"><div class="ws-title" data-i18n="closed_heading">Recently closed</div>
+    <button class="btn ghost" id="closed-toggle" data-i18n="show" data-i18n-title="show_title">Show</button></div>
+  <div id="closed-wrap" hidden>
+    <div class="caption" id="closed-caption"></div>
+    <div class="rows" id="closed"></div>
+  </div>
+</section>
+<div class="sheet" id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+  <div class="sheet-box">
+    <div class="sheet-title" id="sheet-title"></div>
+    <div class="sheet-text" id="sheet-text"></div>
+    <div class="sheet-actions">
+      <button class="btn ghost" id="sheet-cancel" data-i18n="cancel" data-i18n-title="cancel_title">Cancel</button>
+      <button class="btn" id="sheet-ok"></button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" data-i18n-title="toast_dismiss_title"></div>
+
+<script>
+  // Every visible word comes from the string table the server picks for this browser's
+  // language (/i18n). This file holds no user-facing text of its own beyond English fallbacks.
+  let S = {};
+  const t = (key, vars) => {
+    let s = S[key] ?? key;
+    for (const k in (vars || {})) s = s.split('{' + k + '}').join(vars[k]);
+    return s;
+  };
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const HDR = { 'X-TabTower-Phone': '1' };
+  const STATUSES = ['working', 'waiting', 'done', 'idle', 'error', 'wrapped', 'replaced'];
+
+  async function loadStrings() {
+    const langs = (navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || 'en']).join(',');
+    try {
+      const r = await fetch('/i18n?langs=' + encodeURIComponent(langs), { cache: 'no-store' });
+      const d = await r.json();
+      S = d.strings || {};
+      document.documentElement.lang = d.lang || 'en';
+      document.documentElement.dir = S._dir === 'rtl' ? 'rtl' : 'ltr';
+    } catch { S = {}; }
+    document.title = t('app_title');
+    document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
+    $('stamp').textContent = t('loading');
+  }
+
+  // Relative time in the Claude app's units: now / 12m / 4h / 1d.
+  function ago(ms) {
+    const m = Math.max(0, Math.round((Date.now() - ms) / 60000));
+    if (m < 1) return t('now');
+    if (m < 60) return m + t('unit_m');
+    if (m < 1440) return Math.floor(m / 60) + t('unit_h');
+    return Math.floor(m / 1440) + t('unit_d');
+  }
+
+  const statusKey = (s) => (STATUSES.includes(s) ? s : 'idle');
+
+  function hideToast() {
+    $('toast').style.display = 'none';
+    document.body.classList.remove('toasting');
+  }
+  function toast(html, ms = 6000) {
+    const el = $('toast');
+    el.innerHTML = html; el.style.display = 'block';
+    document.body.classList.add('toasting');
+    clearTimeout(el._h); el._h = setTimeout(hideToast, ms);
+  }
+  // Tapping the message (anywhere but its link) dismisses it.
+  $('toast').addEventListener('click', (ev) => { if (!ev.target.closest('a')) hideToast(); });
+
+  function reason(d, status) {
+    const code = d && d.error ? d.error : '';
+    const known = code && S['err_' + code] ? t('err_' + code) : (code || ('HTTP ' + status));
+    return d && d.detail ? known + ' (' + d.detail + ')' : known;
+  }
+
+  // ---- confirmation sheet: every action that changes something on the PC asks first ----
+  let sheetDone = null;
+  function confirmSheet(title, text, okLabel, okTitle, danger) {
+    $('sheet-title').textContent = title;
+    $('sheet-text').textContent = text;
+    const ok = $('sheet-ok');
+    ok.textContent = okLabel; ok.title = okTitle || '';
+    ok.className = 'btn' + (danger ? ' danger' : '');
+    $('sheet').hidden = false;
+    ok.focus();
+    return new Promise((resolve) => { sheetDone = resolve; });
+  }
+  function closeSheet(answer) {
+    if ($('sheet').hidden) return;
+    $('sheet').hidden = true;
+    const done = sheetDone; sheetDone = null;
+    if (done) done(answer);
+  }
+  $('sheet-ok').addEventListener('click', () => closeSheet(true));
+  $('sheet-cancel').addEventListener('click', () => closeSheet(false));
+  $('sheet').addEventListener('click', (ev) => { if (ev.target === $('sheet')) closeSheet(false); });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeSheet(false); });
+
+  // ---- the session list ----
+  let busy = false;
+  let lastCards = [];
+
+  function row(s) {
+    const k = statusKey(s.status);
+    const label = s.new ? t('st_new') : t('st_' + k) + (k === 'done' && s.ack ? ' · ' + t('seen') : '');
+    const inner = `<span class="dot"></span>
+      <span class="r-main"><div class="r-title" dir="auto">${esc(s.title || t('untitled'))}</div>
+      <div class="r-meta">${esc(label)}${s.at ? ' · ' + esc(ago(s.at)) : ''}${s.group ? ' · <bdi>' + esc(s.group) + '</bdi>' : ''}</div></span>
+      ${s.link ? `<span class="go">${esc(t('open_app'))}</span>` : ''}`;
+    const main = s.link
+      ? `<a class="row-link" href="${esc(s.link)}" title="${esc(t('open_app_title'))}">${inner}</a>`
+      : `<div class="row-link">${inner}</div>`;
+    return `<div class="row st-${k}${s.new ? ' is-new' : ''}">${main}<button class="end" data-close="${esc(s.id)}" data-title="${esc(s.title || '')}"
+      title="${esc(t('close_title'))}">${esc(t('close'))}</button></div>`;
+  }
+
+  function render(d) {
+    lastCards = d.cards || [];
+    const all = lastCards.flatMap((c) => c.sessions);
+    const count = (k) => all.filter((s) => s.status === k).length;
+    $('chips').innerHTML =
+      `<span class="chip waiting">${esc(t('chip_waiting'))} <b>${count('waiting')}</b></span>
+       <span class="chip">${esc(t('chip_working'))} <b>${count('working')}</b></span>
+       <span class="chip">${esc(t('chip_done'))} <b>${count('done')}</b></span>`;
+    $('stamp').textContent = t('updated', { time: new Date().toLocaleTimeString(document.documentElement.lang, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) });
+    $('summary').textContent = t('summary', { sessions: all.length, cards: lastCards.length });
+
+    const html = lastCards.map((c, i) => {
+      // Newest activity first, the same order as the Claude app's own session list.
+      const ss = [...c.sessions].sort((a, b) => (b.at || 0) - (a.at || 0));
+      const many = c.targets.length > 1;
+      const buttons = c.targets.length
+        ? `<div class="groups">${c.targets.map((g) => g.state === 'ready'
+            ? `<button class="btn" data-card="${i}" data-group="${esc(g.group)}" title="${esc(t('new_session_title'))}">${esc(many ? t('new_session_group', { group: g.label }) : t('new_session'))}</button>`
+            : `<button class="btn ghost" data-card="${i}" data-group="${esc(g.group)}" title="${esc(t('launch_title'))}">${esc(t('launch_group', { group: g.label }))}</button>`).join('')}</div>`
+        : `<span class="r-meta">${esc(t('no_window'))}</span>`;
+      return `<section class="card" data-color="${esc(c.color)}">
+        <div class="card-h"><div style="min-width:0"><div class="ws-title" dir="auto">${esc(c.title)}</div>
+        <div class="ws-path">${esc(c.path)}</div></div>${buttons}</div>
+        <div class="rows">${ss.length ? ss.map(row).join('') : `<div class="empty">${esc(t('no_sessions'))}</div>`}</div>
+      </section>`;
+    }).join('');
+    $('list').innerHTML = html || `<div class="banner">${esc(t('no_cards'))}</div>`;
+    // The card's own colour, as on the deck. Set through the DOM so the value is never parsed as markup.
+    $('list').querySelectorAll('section.card').forEach((el) => { el.style.borderInlineStartColor = el.dataset.color || ''; });
+  }
+
+  function showPairing(d) {
+    $('list').innerHTML = ''; $('chips').innerHTML = ''; $('summary').textContent = ''; $('stamp').textContent = '';
+    $('closed-card').hidden = true;
+    $('pair').hidden = false;
+    if (d.error === 'denied') {
+      $('pair-title').textContent = t('denied_title');
+      $('pair-text').textContent = t('denied_text');
+      $('pair-code-label').textContent = ''; $('pair-code').textContent = ''; $('pair-wait').textContent = '';
+    } else {
+      $('pair-title').textContent = t('pair_title');
+      $('pair-text').textContent = t('pair_text', { device: d.device || '' });
+      $('pair-code-label').textContent = t('pair_code_label');
+      $('pair-code').textContent = d.code || '';
+      $('pair-wait').textContent = t('pair_wait');
+    }
+  }
+
+  let pairTimer = null;
+  async function load() {
+    if (busy) return;
+    try {
+      const r = await fetch('/api/list', { cache: 'no-store', headers: HDR });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 403 && (d.error === 'pairing' || d.error === 'denied')) {
+        showPairing(d);
+        clearTimeout(pairTimer);
+        pairTimer = setTimeout(load, 3000);   // opens by itself once approved on the PC
+        return;
+      }
+      if (!r.ok) {
+        $('banner').innerHTML = `<div class="banner err">${esc(reason(d, r.status))}</div>`;
+        return;
+      }
+      $('pair').hidden = true;
+      $('closed-card').hidden = false;
+      $('banner').innerHTML = '';
+      render(d);
+    } catch (e) {
+      $('banner').innerHTML = `<div class="banner err">${esc(t('err_unreachable', { reason: e.message }))}</div>`;
+    }
+  }
+
+  // A session just opened from here: refresh every 3 s until its row carries the app link
+  // (Claude Code publishes it a moment after the session starts), for up to a minute.
+  let linkWatch = null;
+  function watchForLink(id) {
+    clearInterval(linkWatch);
+    let tries = 0;
+    linkWatch = setInterval(async () => {
+      tries++;
+      await load();
+      const row = lastCards.flatMap((c) => c.sessions).find((s) => s.id === id);
+      if ((row && row.link) || tries >= 20) clearInterval(linkWatch);
+    }, 3000);
+  }
+
+  async function post(path, body) {
+    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...HDR }, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    return { r, d };
+  }
+
+  // Close one session, and its tab on the PC.
+  $('list').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('button[data-close]');
+    if (!b || busy) return;
+    ev.preventDefault();
+    const title = b.dataset.title || t('untitled');
+    if (!await confirmSheet(t('close_confirm_title'), t('close_confirm_text', { title }), t('close_confirm_ok'), t('close_title'), true)) return;
+    busy = true;
+    b.disabled = true; b.textContent = t('closing');
+    try {
+      const { r, d } = await post('/api/close', { id: b.dataset.close });
+      // A session closed before its first message is dropped on the PC, so it has nothing to
+      // reopen and does not appear under "Recently closed": the message says so.
+      toast(d.ok ? esc(t(d.removed ? 'toast_closed_empty' : 'toast_closed')) : esc(t('failed', { reason: reason(d, r.status) })),
+            d.ok ? (d.removed ? 9000 : 4000) : 9000);
+    } catch (e) {
+      toast(esc(t('failed', { reason: e.message })), 9000);
+    } finally {
+      busy = false; load();
+      // An open "Recently closed" shows the session just closed, ready to reopen.
+      if (!$('closed-wrap').hidden) loadClosed();
+    }
+  });
+
+  // Open a new session from a card. It runs code on the PC, so it is confirmed first.
+  $('list').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('button[data-card]');
+    if (!b || busy) return;
+    const c = lastCards[Number(b.dataset.card)];
+    if (!c) return;
+    const target = c.targets.find((g) => g.group === b.dataset.group) || { group: '', label: '' };
+    const groupText = target.label && c.targets.length > 1 ? t('new_confirm_group', { group: target.label }) : '';
+    if (!await confirmSheet(t('new_confirm_title'), t('new_confirm_text', { card: c.title, group: groupText }),
+                            t('new_confirm_ok'), t('new_session_title'), false)) return;
+    busy = true;
+    document.querySelectorAll('button[data-card]').forEach((x) => (x.disabled = true));
+    b.textContent = t('opening');
+    toast(esc(t('toast_opening')), 40000);
+    try {
+      const { r, d } = await post('/api/new', { card: c.key, group: target.group });
+      if (!d.ok) toast(esc(t('failed', { reason: reason(d, r.status) })), 9000);
+      else if (d.launching) toast(esc(t('toast_launching')), 15000);
+      else if (d.link) toast(`${esc(t('toast_new_link'))} <a href="${esc(d.link)}">${esc(t('toast_open_in_app'))}</a>`, 20000);
+      else toast(esc(t('toast_new_nolink')), 9000);
+      if (d.ok && d.sessionId && !d.link) watchForLink(d.sessionId);
+    } catch (e) {
+      toast(esc(t('failed', { reason: e.message })), 9000);
+    } finally { busy = false; load(); }
+  });
+
+  // ---- recently closed: loaded only when opened ----
+  async function loadClosed() {
+    const box = $('closed');
+    box.innerHTML = `<div class="empty">${esc(t('loading'))}</div>`;
+    try {
+      const r = await fetch('/api/closed', { cache: 'no-store', headers: HDR });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) { box.innerHTML = `<div class="empty">${esc(reason(d, r.status))}</div>`; return; }
+      $('closed-caption').textContent = t('closed_caption', { n: d.sessions.length });
+      box.innerHTML = d.sessions.length ? d.sessions.map((s) => `<div class="row st-idle">
+          <div class="row-link"><span class="dot"></span><span class="r-main">
+            <div class="r-title" dir="auto">${esc(s.title || t('untitled'))}</div>
+            <div class="r-meta">${esc(t('closed_meta'))} · ${esc(ago(s.at))}${s.group ? ' · <bdi>' + esc(s.group) + '</bdi>' : ''} · <bdi>${esc(s.workspace)}</bdi></div></span></div>
+          <button class="reopen" data-reopen="${esc(s.id)}" data-title="${esc(s.title || '')}" title="${esc(t('reopen_title'))}">${esc(t('reopen'))}</button></div>`).join('')
+        : `<div class="empty">${esc(t('no_closed'))}</div>`;
+    } catch (e) {
+      box.innerHTML = `<div class="empty">${esc(t('failed', { reason: e.message }))}</div>`;
+    }
+  }
+
+  $('closed-toggle').addEventListener('click', () => {
+    const wrap = $('closed-wrap');
+    wrap.hidden = !wrap.hidden;
+    $('closed-toggle').textContent = t(wrap.hidden ? 'show' : 'hide');
+    $('closed-toggle').title = t(wrap.hidden ? 'show_title' : 'hide_title');
+    if (!wrap.hidden) loadClosed();
+  });
+
+  $('closed').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('button[data-reopen]');
+    if (!b || busy) return;
+    // No confirmation here, by decision: reopening is undone by closing it again, unlike a close.
+    busy = true;
+    b.disabled = true; b.textContent = t('reopening');
+    toast(esc(t('toast_reopening')), 30000);
+    try {
+      const { r, d } = await post('/api/reopen', { id: b.dataset.reopen });
+      if (!d.ok) toast(esc(t('failed', { reason: reason(d, r.status) })), 9000);
+      else if (d.link) toast(`${esc(t('toast_reopened_link'))} <a href="${esc(d.link)}">${esc(t('toast_open_in_app'))}</a>`, 20000);
+      else toast(esc(t('toast_reopened_nolink')), 9000);
+    } catch (e) {
+      toast(esc(t('failed', { reason: e.message })), 9000);
+    } finally { busy = false; load(); loadClosed(); }
+  });
+
+  // A full reload, not just a data fetch: it also brings a newer version of this page.
+  $('refresh').addEventListener('click', () => location.reload());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+  setInterval(() => { if (!document.hidden && $('pair').hidden && $('sheet').hidden) load(); }, 15000);
+  loadStrings().then(load);
+</script>
+</body>
+</html>

@@ -17,7 +17,7 @@ public partial class TasksFileDialog : Window
     /// <summary>The file contract, for the 📋 button — hand this to whatever produces the
     /// file (a script, Claude, ...). Keep in sync with TasksFileService/TasksDocument.</summary>
     private const string SpecText = """
-        # The TabTower tasks file — the JSON contract (version 1)
+        # The TabTower tasks file: the JSON contract (version 1)
 
         TabTower only reads the file (read-only) and refreshes automatically on every save.
         The producer (whatever writes the file) owns the content, the order and the colors.
@@ -29,7 +29,7 @@ public partial class TasksFileDialog : Window
           "version": 1,
           "generated": "2026-07-27T10:00:00+03:00",
           "statusColors": { "in-progress": "#4FC3F7", "ready": "green" },
-          "newSessionPrompt": "Let's work on task <id> — <name>",
+          "newSessionPrompt": "Let's work on task <id>: <name>",
           "tasks": [
             {
               "id": "task-42",
@@ -47,27 +47,27 @@ public partial class TasksFileDialog : Window
 
         ## Envelope fields
 
-        - `version` — required, must be 1. Anything else = a visible error state.
-        - `generated` — optional. ISO timestamp of when the file was produced; shown as a freshness hint.
-        - `statusColors` — optional. status→color map: `#RRGGBB` or a name
+        - `version`: required, must be 1. Anything else = a visible error state.
+        - `generated`: optional. ISO timestamp of when the file was produced; shown as a freshness hint.
+        - `statusColors`: optional. status→color map: `#RRGGBB` or a name
           (red, green, orange, blue, gray, yellow, purple, cyan, magenta, white, black).
-          A status with no color renders neutral. Color is data semantics — the producer's call.
-        - `newSessionPrompt` — optional. Text template for a new session opened by clicking a task;
+          A status with no color renders neutral. Color is data semantics, the producer's call.
+        - `newSessionPrompt`: optional. Text template for a new session opened by clicking a task;
           `<id>` and `<name>` are replaced with the task's values. The text is left waiting in the
           input box (not submitted). Missing → a new session opens empty.
 
         ## Task fields
 
-        - `id` — **required**. Unique identifier (string).
-        - `name` — **required**. Task name.
-        - `description` — optional.
-        - `status` — optional. Free-form string; the color comes from statusColors.
-        - `pinned` — optional (bool). Pinned tasks come first, with a marker and a separator line.
-        - `workspace` — optional. **Full path** of the project folder; matching to a TabTower
+        - `id`: **required**. Unique identifier (string).
+        - `name`: **required**. Task name.
+        - `description`: optional.
+        - `status`: optional. Free-form string; the color comes from statusColors.
+        - `pinned`: optional (bool). Pinned tasks come first, with a marker and a separator line.
+        - `workspace`: optional. **Full path** of the project folder; matching to a TabTower
           card is done by path. Without it there is no "open session" button.
-        - `sessions` — optional. List of Claude Code session UUIDs (many-to-many).
-        - `url` — optional. Link that opens the task (via ShellExecute, e.g. obsidian://...).
-        - `sessionPrompt` — optional. This card's own launch phrase, same `<id>`/`<name>`
+        - `sessions`: optional. List of Claude Code session UUIDs (many-to-many).
+        - `url`: optional. Link that opens the task (via ShellExecute, e.g. obsidian://...).
+        - `sessionPrompt`: optional. This card's own launch phrase, same `<id>`/`<name>`
           placeholders, used instead of the envelope's `newSessionPrompt`. For a document whose
           cards are not all the same kind of thing (a list of packages rather than of tasks).
 
@@ -84,7 +84,7 @@ public partial class TasksFileDialog : Window
         ## Behavior rules
 
         - An entry with no `id` or `name` is skipped with a visible warning; the rest still loads.
-        - Unknown keys are ignored silently (forward-compat) — you may add fields of your own.
+        - Unknown keys are ignored silently (forward-compat), so you may add fields of your own.
         - Display order = array order (after the pinned ones); sorting is the producer's job.
         - Broken JSON / missing file / unsupported version → a visible error state instead of a list.
         - Writing atomically (temp file + rename) is recommended; either way a locked file is retried briefly.
@@ -125,7 +125,7 @@ public partial class TasksFileDialog : Window
             string? dir = Path.GetDirectoryName(Path.GetFullPath(path));
             if (dir == null || !Directory.Exists(dir))
                 return (false, "The file's folder does not exist");
-            return (true, File.Exists(path) ? "" : "The file does not exist yet — it will load once created");
+            return (true, File.Exists(path) ? "" : "The file does not exist yet; it will load once created");
         }
         catch
         {
@@ -150,7 +150,7 @@ public partial class TasksFileDialog : Window
         }
         catch (System.Runtime.InteropServices.ExternalException)
         {
-            PreviewText.Text = "The clipboard is busy — try again";
+            PreviewText.Text = "The clipboard is busy, try again";
         }
     }
 

@@ -225,14 +225,19 @@ public sealed class CommandExecutor
                 // dropped rather than archived) and the tab is found through that record.
                 // Opt-in, so the SessionEnd hook keeps ending sessions without touching tabs —
                 // a session usually ends because its tab was closed in the first place.
-                string tabNote = "";
-                if (a.Flags.Contains("close-tab"))
+                if (!a.Flags.Contains("close-tab"))
                 {
-                    var (closed, whyTab) = _window.CloseSessionTab(id);
-                    tabNote = closed ? "; closing its VSCode tab" : $"; its VSCode tab was left open: {whyTab}";
+                    var (plainMsg, plainOk) = _window.EndSession(id, HookInfoFrom(a));
+                    return plainOk ? Ok(plainMsg) : Err(plainMsg);
                 }
+                // Read before the two calls below, because EndSession marks a live session closed.
+                // A session that had already ended gets its own answer (see SessionEndReply). A
+                // replaced one keeps CloseSessionTab's answer: the deck closes that tab itself.
+                bool endedBefore = Vm.FindSession(id) is { } known && known.Item2.Closed &&
+                                   known.Item2.Status != SessionStatus.Replaced;
+                var (closed, whyTab) = _window.CloseSessionTab(id);
                 var (msg, ok) = _window.EndSession(id, HookInfoFrom(a));
-                return ok ? Ok(msg + tabNote) : Err(msg);
+                return ok ? Ok(SessionEndReply.WithCloseTab(id, msg, endedBefore, closed, whyTab)) : Err(msg);
             }
             // The tab of a session that is still ALIVE, closed by session id rather than by its
             // label — the only way to reach one of several tabs all called "Claude Code", which
@@ -265,7 +270,7 @@ public sealed class CommandExecutor
                 {
                     groupNew = _window.GroupById(groupId);
                     if (groupNew == null)
-                        return Err($"unknown group '{groupId}' — see: tabtower groups");
+                        return Err($"unknown group '{groupId}', see: tabtower groups");
                 }
                 // --after <sid>: open the tab NEXT TO that session's tab (VSCode places a new
                 // editor to the right of the active one, so the extension reveals that tab first).
@@ -317,7 +322,7 @@ public sealed class CommandExecutor
     private PipeResponse Groups()
     {
         if (_window.SessionGroups.Count == 0)
-            return Ok("(no session groups — every new session goes to the window focused last)");
+            return Ok("(no session groups: every new session goes to the window focused last)");
         var sb = new StringBuilder();
         foreach (var g in _window.SessionGroups)
         {
@@ -336,7 +341,7 @@ public sealed class CommandExecutor
         if (sub == "list")
         {
             if (Vm.CustomToggles.Count == 0)
-                return Ok("(no toggles — add them from the settings menu: Toggles (flags))");
+                return Ok("(no toggles; add them from the settings menu: Toggles (flags))");
             return Ok(string.Join(Environment.NewLine,
                 Vm.CustomToggles.Select(t => $"{t.Id}  {(t.Enabled ? "on " : "off")}  {t.Name}")));
         }

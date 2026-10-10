@@ -120,6 +120,12 @@ try {
     $r = Deck @('session', 'close-tab', '--id', $idD)
     Check 'refused, and it says why' ($r.Code -ne 0 -and $r.Out -match 'already ended' -and $r.Out -match 'resume it') "[$($r.Code)] $($r.Out)"
     Check 'nothing was pushed for an ended session' ((Read-Pushed 1200) -eq '')
+
+    Write-Host "Case 7: end --close-tab on a session that already ENDED says that, not advice to run it again"
+    $r = Deck @('session', 'end', '--id', $idD, '--close-tab')
+    Check 'it says the session had already ended' ($r.Code -eq 0 -and $r.Out -match 'had already ended') "[$($r.Code)] $($r.Out)"
+    Check 'no pointer back to the same command, no claim that the tab is open' ($r.Out -notmatch 'Pass --close-tab' -and $r.Out -notmatch 'left open') "[$($r.Code)] $($r.Out)"
+    Check 'nothing was pushed for it either' ((Read-Pushed 1200) -eq '')
 }
 finally {
     Deck @('session', 'end', '--id', $idA) | Out-Null

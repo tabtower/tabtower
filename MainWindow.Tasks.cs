@@ -211,7 +211,7 @@ public partial class MainWindow
 
         if (!task.HasTarget)
         {
-            SetStatus($"\"{task.Name}\" — the task has no workspace and no sessions");
+            SetStatus($"\"{task.Name}\": the task has no workspace and no sessions");
             return;
         }
         if (task.Sessions.Count == 0)
@@ -252,7 +252,7 @@ public partial class MainWindow
             var item = new MenuItem
             {
                 Header = (live ? "🟢 " : "▶ ") + title,
-                ToolTip = live ? "Live session — switch to it" : "Session not running — reopen it (resume)",
+                ToolTip = live ? "Live session: switch to it" : "Session not running: reopen it (resume)",
             };
             string capturedSid = sid;
             item.Click += (_, _) => OpenTaskSession(task, capturedSid);
@@ -287,7 +287,7 @@ public partial class MainWindow
         }
         if (square.Url.Length == 0)
         {
-            SetStatus($"{square.Number} — nowhere to navigate to");
+            SetStatus($"{square.Number}: nowhere to navigate to");
             return;
         }
         OpenUrl(square.Url, square.Number);
@@ -322,7 +322,7 @@ public partial class MainWindow
         }
         if (!task.HasWorkspace)
         {
-            SetStatus($"\"{task.Name}\" — unknown session, and the task has no workspace to open it in");
+            SetStatus($"\"{task.Name}\": unknown session, and the task has no workspace to open it in");
             return;
         }
         if (Vm.FindByPath(task.WorkspacePath) is { } ws)
@@ -333,12 +333,12 @@ public partial class MainWindow
                 _pendingOpens[WorkspaceMetadata.NormalizePath(ws.Path)] = (sessionId, null, null, DateTime.Now);
             else if (!conn.TrySend(new { Cmd = "openSession", SessionId = sessionId, Maximize = Vm.OpenSessionMaximized }))
                 _connectors.Remove(conn);
-            SetStatus($"Opening a session of \"{task.Name}\" in VSCode…");
+            SetStatus($"Opening a session of \"{task.Name}\" in VS Code…");
             return;
         }
         if (!Directory.Exists(task.WorkspacePath))
         {
-            SetStatus($"\"{task.Name}\" — the workspace folder does not exist: {task.WorkspacePath}");
+            SetStatus($"\"{task.Name}\": the workspace folder does not exist ({task.WorkspacePath})");
             return;
         }
         // Workspace isn't on the deck — launch VSCode directly; the extension connects and
@@ -346,10 +346,10 @@ public partial class MainWindow
         if (WindowActions.LaunchVsCode(task.WorkspacePath))
         {
             _pendingOpens[WorkspaceMetadata.NormalizePath(task.WorkspacePath)] = (sessionId, null, null, DateTime.Now);
-            SetStatus($"Launching VSCode for \"{task.Name}\" — the session will start once the connector is up");
+            SetStatus($"Launching VS Code for \"{task.Name}\"; the session will start once the connector is up");
         }
         else
-            SetStatus($"\"{task.Name}\" — launching VSCode failed");
+            SetStatus($"\"{task.Name}\": launching VS Code failed");
     }
 
     /// <summary>The session group the keys held right now ask for, on the card this task
@@ -392,7 +392,7 @@ public partial class MainWindow
     {
         if (!task.HasWorkspace)
         {
-            SetStatus($"\"{task.Name}\" — the task has no workspace to open a session in");
+            SetStatus($"\"{task.Name}\": the task has no workspace to open a session in");
             return;
         }
         string? prompt = BuildNewSessionPrompt(task, fast);
@@ -411,22 +411,22 @@ public partial class MainWindow
         // there is nothing to aim the session at.
         if (away)
         {
-            SetStatus($"\"{task.Name}\" — {group?.Name ?? path}: that folder has no card on the deck, nothing opened");
+            SetStatus($"\"{task.Name}\", {group?.Name ?? path}: that folder has no card on the deck, nothing opened");
             LogService.Info("tasks", $"task {task.Id} not opened: \"{path}\" has no card");
             return;
         }
         if (!Directory.Exists(task.WorkspacePath))
         {
-            SetStatus($"\"{task.Name}\" — the workspace folder does not exist: {task.WorkspacePath}");
+            SetStatus($"\"{task.Name}\": the workspace folder does not exist ({task.WorkspacePath})");
             return;
         }
         if (WindowActions.LaunchVsCode(task.WorkspacePath))
         {
             _pendingOpens[WorkspaceMetadata.NormalizePath(task.WorkspacePath)] = (null, prompt, null, DateTime.Now);
-            SetStatus($"Launching VSCode for \"{task.Name}\" — a new session will open once the connector is up");
+            SetStatus($"Launching VS Code for \"{task.Name}\"; a new session will open once the connector is up");
         }
         else
-            SetStatus($"\"{task.Name}\" — launching VSCode failed");
+            SetStatus($"\"{task.Name}\": launching VS Code failed");
     }
 
     /// <summary>newSessionPrompt from the file's envelope with &lt;id&gt;/&lt;name&gt;

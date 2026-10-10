@@ -62,18 +62,18 @@
                             <ContextMenu>
                                 <MenuItem x:Name="StartupMenuItem" Header="Start with Windows"
                                           IsCheckable="True" Click="StartupMenuItem_Click"/>
-                                <MenuItem x:Name="MaximizeSessionMenuItem" Header="Collapse the VSCode panels when opening a session"
+                                <MenuItem x:Name="MaximizeSessionMenuItem" Header="Collapse the VS Code panels when opening a session"
                                           IsCheckable="True" Click="MaximizeSessionMenuItem_Click"
                                           ToolTip="When a session is clicked on the deck: close the side and bottom panels so the tab fills the whole area"/>
                                 <MenuItem x:Name="NotificationsMenuItem" Header="Windows notifications"
                                           IsCheckable="True" Click="NotificationsMenuItem_Click"
-                                          ToolTip="When on: a session that needs attention raises a Windows notification, a colored dot on the taskbar icon and a single flash.&#10;Active only while both 📌 and the Zone are off — in any other state the deck is visible anyway, and the card blink is enough.&#10;Even then, no notification is shown while the deck has focus."/>
+                                          ToolTip="When on: a session that needs attention raises a Windows notification, a colored dot on the taskbar icon and a single flash.&#10;Active only while both 📌 and the Zone are off: in any other state the deck is visible anyway, and the card blink is enough.&#10;Even then, no notification is shown while the deck has focus."/>
                                 <MenuItem x:Name="HeadlessSessionsMenuItem" Header="Show headless sessions"
                                           IsCheckable="True" Click="HeadlessSessionsMenuItem_Click"
                                           ToolTip="Sessions nobody opened by hand: scheduled tasks and runners that launch `claude --print`.&#10;They fire exactly the same hooks as a real session, so without this every timer on the machine earns a card.&#10;Off by default. A card left with none of its own sessions drops off the deck, and a search still finds them."/>
                                 <MenuItem x:Name="WindowPreviewsMenuItem" Header="Window preview on cards"
                                           IsCheckable="True" Click="WindowPreviewsMenuItem_Click"
-                                          ToolTip="The live picture of the bound VSCode window on each card, 170px tall.&#10;Off by default: an inactive tab renders nothing anyway, so it mostly shows whichever file that window last had in front.&#10;Off, a card with no window still says so."/>
+                                          ToolTip="The live picture of the bound VS Code window on each card, 170px tall.&#10;On by default. An inactive tab renders nothing, so it mostly shows whichever file that window last had in front; switch it off to give the cards that room back.&#10;Off, a card with no window still says so."/>
                                 <Separator/>
                                 <MenuItem x:Name="TasksStripMenuItem" Header="Tasks strip on the deck"
                                           IsCheckable="True" Click="TasksStripMenuItem_Click"
@@ -81,7 +81,13 @@
                                 <MenuItem Header="Tasks file (JSON)..." Click="TasksFileMenuItem_Click"
                                           ToolTip="A read-only tasks panel fed by an external JSON file (for instance, from an external tool that produces the tasks file). Empty = off"/>
                                 <MenuItem Header="Toggles (flags)..." Click="TogglesMenuItem_Click"
-                                          ToolTip="Toolbar toggle buttons whose state is written to a flag file — for driving external processes"/>
+                                          ToolTip="Toolbar toggle buttons whose state is written to a flag file, for driving external processes"/>
+                                <Separator/>
+                                <MenuItem x:Name="PhoneAccessMenuItem" Header="Phone access"
+                                          IsCheckable="True" Click="PhoneAccessMenuItem_Click"
+                                          ToolTip="A page for your phone listing your sessions, to open, close and reopen them from anywhere on your tailnet.&#10;Listens on this PC only (127.0.0.1); you expose it with `tailscale serve`, and every new device is approved here first.&#10;Off by default. Details and the exact command: Phone access settings."/>
+                                <MenuItem Header="Phone access settings..." Click="PhoneAccessSettingsMenuItem_Click"
+                                          ToolTip="Port, the tailscale serve command, the devices you approved (with Revoke), and requests waiting for an answer"/>
                                 <Separator/>
                                 <MenuItem x:Name="VersionMenuItem" IsEnabled="False"/>
                             </ContextMenu>
@@ -91,7 +97,7 @@
                          row: restarting VSCode is when the deck fills with dead sessions, and
                          a cleanup you have to hunt for is one you stop using. -->
                     <Button x:Name="ReconcileButton" Content="↻" FontSize="15"
-                            ToolTip="Refresh now: re-read what VSCode actually has open and close the sessions whose tab or window is gone.&#10;The deck does this on its own, but deliberately slowly. Press this after restarting VSCode, when you can see it is out of date.&#10;A session closed by mistake comes back the moment it does anything."
+                            ToolTip="Refresh now: re-read what VS Code actually has open and close the sessions whose tab or window is gone.&#10;The deck does this on its own, but deliberately slowly. Press this after restarting VS Code, when you can see it is out of date.&#10;A session closed by mistake comes back the moment it does anything."
                             Background="Transparent" Foreground="White" BorderThickness="0"
                             Padding="8,2" Margin="0,2" Cursor="Hand" Click="Reconcile_Click"/>
                     <!-- The tasks page has to stay reachable from the deck even with the strip
@@ -256,20 +262,55 @@
           <!-- Two halves: search on the left, Run-a-task-by-number on the
                right. The search box was the whole row and did not need to be; the right half
                replaces walking to a card and clicking its "New session" button. Equal columns
-               so neither half moves as the other's contents change. -->
-          <Grid>
+               so neither half moves as the other's contents change.
+
+               The row has three shapes, and the Grid's Tag says which (the parts below read it):
+               - OneRow: both halves side by side, as described above.
+               - SearchOnly: no tasks file, so no Run half. The search half takes the whole
+                 row. It used to keep to its own column while the other stood empty, which in
+                 a 40% zone left the search box about 7 px wide.
+               - TwoRows: both halves are wanted but do not fit side by side, so the Run half
+                 drops to a second line and each takes the full width. That is the case while
+                 "Search content too" is showing and the row is under 760 px, the width below
+                 which the search box would be narrower than 120 px (measured: 121.8 px at
+                 762). On the tasks page the checkbox is hidden, the box is 138 px even at
+                 the window's minimum width, and the row stays on one line. -->
+          <Grid x:Name="SearchGrid">
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Setter Property="Tag" Value="OneRow"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding TasksPanel.Enabled}" Value="False">
+                            <Setter Property="Tag" Value="SearchOnly"/>
+                        </DataTrigger>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding TasksPanel.Enabled}" Value="True"/>
+                                <Condition Binding="{Binding Visibility, ElementName=SearchContentCheck}" Value="Visible"/>
+                                <Condition Binding="{Binding ActualWidth, ElementName=SearchRow, Converter={StaticResource NarrowerThan}, ConverterParameter=760}" Value="True"/>
+                            </MultiDataTrigger.Conditions>
+                            <Setter Property="Tag" Value="TwoRows"/>
+                        </MultiDataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <!-- separator between the halves; hidden with the Run half -->
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <!-- separator between the halves; drawn only while they stand side by side -->
             <Border Grid.Column="1" Width="1" Background="#FF333333" Margin="10,1">
                 <Border.Style>
                     <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed"/>
                         <Style.Triggers>
-                            <DataTrigger Binding="{Binding TasksPanel.Enabled}" Value="False">
-                                <Setter Property="Visibility" Value="Collapsed"/>
+                            <DataTrigger Binding="{Binding Tag, ElementName=SearchGrid}" Value="OneRow">
+                                <Setter Property="Visibility" Value="Visible"/>
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>
@@ -277,12 +318,19 @@
             </Border>
             <!-- right half: type a task number, press Run. Hidden when no tasks file is
                  configured, since there would be nothing to resolve a number against. -->
-            <DockPanel Grid.Column="2" LastChildFill="True">
+            <DockPanel LastChildFill="True">
                 <DockPanel.Style>
                     <Style TargetType="DockPanel">
+                        <Setter Property="Grid.Column" Value="2"/>
                         <Style.Triggers>
-                            <DataTrigger Binding="{Binding TasksPanel.Enabled}" Value="False">
+                            <DataTrigger Binding="{Binding Tag, ElementName=SearchGrid}" Value="SearchOnly">
                                 <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Tag, ElementName=SearchGrid}" Value="TwoRows">
+                                <Setter Property="Grid.Row" Value="1"/>
+                                <Setter Property="Grid.Column" Value="0"/>
+                                <Setter Property="Grid.ColumnSpan" Value="3"/>
+                                <Setter Property="Margin" Value="0,5,0,0"/>
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>
@@ -292,15 +340,26 @@
                 <Button DockPanel.Dock="Right" Content="Run" Click="RunTask_Click"
                         Background="#FF3A6EA5" Foreground="White" BorderThickness="0"
                         Padding="12,3" Margin="6,0,0,0" Cursor="Hand"
-                        ToolTip="Open a session for that task — the same thing its card's “New session” button does. On a card with session groups, the held modifier picks the group; with TasksFollowGroups on it picks one for every task, and Shift opens the task in its own folder."/>
+                        ToolTip="Open a session for that task, the same thing its card's “New session” button does. On a card with session groups, the held modifier picks the group; with TasksFollowGroups on it picks one for every task, and Shift opens the task in its own folder."/>
                 <!-- A task number is ASCII and must not follow the UI's direction. -->
                 <TextBox x:Name="RunTaskBox" VerticalContentAlignment="Center" FontSize="13"
                          Background="#FF2A2A2A" Foreground="White" BorderBrush="#FF444444"
                          CaretBrush="White" Padding="6,3" FlowDirection="LeftToRight"
                          KeyDown="RunTaskBox_KeyDown" TextChanged="RunTaskBox_TextChanged"
-                         ToolTip="A task number, e.g. 4.13 or 4.13.19. Enter runs it. Add “fast” for the task's fast variant, and a group's id or alias — or hold its modifier — to pick which VS Code instance it opens in. With TasksFollowGroups on, Shift+Enter opens the task in its own folder."/>
+                         ToolTip="A task number, e.g. 4.13 or 4.13.19. Enter runs it. Add “fast” for the task's fast variant, and a group's id or alias (or hold its modifier) to pick which VS Code instance it opens in. With TasksFollowGroups on, Shift+Enter opens the task in its own folder."/>
             </DockPanel>
-            <DockPanel Grid.Column="0" LastChildFill="True">
+            <!-- left half: the whole row unless the Run half stands beside it -->
+            <DockPanel LastChildFill="True">
+                <DockPanel.Style>
+                    <Style TargetType="DockPanel">
+                        <Setter Property="Grid.ColumnSpan" Value="3"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Tag, ElementName=SearchGrid}" Value="OneRow">
+                                <Setter Property="Grid.ColumnSpan" Value="1"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </DockPanel.Style>
                 <TextBlock x:Name="SearchScopeLabel" DockPanel.Dock="Left" Text="🔍 Sessions"
                            Foreground="#FF9A9A9A" FontSize="12" VerticalAlignment="Center"
                            Margin="0,0,8,0"/>

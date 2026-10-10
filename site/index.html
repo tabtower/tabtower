@@ -1,0 +1,312 @@
+<!doctype html>
+<!--
+  Draft landing page for tabtower.dev. One self-contained file: inline CSS, no scripts,
+  no fonts or images fetched from anywhere, no analytics. Every feature named here is one
+  the README states; keep the two in step.
+
+  The demo slot plays assets/hero.mp4, or assets/hero-2x.mp4 in a wide window, with
+  assets/hero.gif inside the <video> for a browser that cannot play video. The files sit next
+  to this page, under site/, so this folder can be published as it is. The README shows the
+  same hero.gif from here.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TabTower: every Claude Code session on one deck</title>
+<meta name="description" content="TabTower is a free Windows app that shows every Claude Code session across all your VS Code windows on one live deck, and takes you to the one that needs you in one click.">
+<meta name="color-scheme" content="light dark">
+<meta property="og:title" content="TabTower">
+<meta property="og:description" content="Every Claude Code session across your VS Code windows, on one live deck. Free and open source for Windows.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='rgb(24,24,24)'/%3E%3Crect x='5' y='5' width='10' height='10' rx='2' fill='rgb(46,46,46)' stroke='rgb(58,110,165)' stroke-width='1.5'/%3E%3Crect x='17' y='5' width='10' height='10' rx='2' fill='rgb(46,46,46)'/%3E%3Crect x='5' y='17' width='10' height='10' rx='2' fill='rgb(46,46,46)'/%3E%3Crect x='17' y='17' width='10' height='10' rx='2' fill='rgb(46,46,46)'/%3E%3Ccircle cx='12' cy='12' r='1.6' fill='rgb(45,125,210)'/%3E%3Ccircle cx='24' cy='12' r='1.6' fill='rgb(243,156,18)'/%3E%3Ccircle cx='12' cy='24' r='1.6' fill='rgb(46,204,113)'/%3E%3Ccircle cx='24' cy='24' r='1.6' fill='rgb(134,134,134)'/%3E%3C/svg%3E">
+<style>
+  /* ---- colour tokens: light by default, dark when the system asks ------------------ */
+  :root {
+    --bg: #fbfbfc;
+    --bg-alt: #f1f3f6;
+    --surface: #ffffff;
+    --text: #15171c;
+    --body: #3d424c;
+    --muted: #6a707b;
+    --line: #dfe2e7;
+    --accent: #2f63a0;
+    --accent-ink: #ffffff;
+    --code-bg: #eef1f5;
+    /* the four state colours are the app's own (blue, orange, purple and grey of its status
+       styles), the same in both schemes, so the legend below matches the deck in the clip */
+    --working: #1e88e5;
+    --waiting: #fb8c00;
+    --done: #8e24aa;
+    --idle: #9e9e9e;
+    /* the headline's emphasis: a page colour, tuned per scheme for contrast */
+    --needs-you: #e08a00;
+    --shadow: 0 1px 2px rgba(20,22,28,0.06), 0 8px 24px rgba(20,22,28,0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161b;
+      --bg-alt: #1a1d23;
+      --surface: #20232a;
+      --text: #f2f3f5;
+      --body: #c3c7cf;
+      --muted: #8b919c;
+      --line: #2f333b;
+      --accent: #4a86c8;
+      --accent-ink: #ffffff;
+      --code-bg: #262a32;
+      --needs-you: #f39c12;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 10px 30px rgba(0,0,0,0.35);
+    }
+  }
+
+  /* ---- base --------------------------------------------------------------------- */
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--body);
+    font: 17px/1.6 "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    overflow-wrap: anywhere;
+  }
+  a { color: var(--accent); }
+  h1, h2, h3 { color: var(--text); line-height: 1.2; margin: 0; }
+  h2 { font-size: 28px; letter-spacing: -0.3px; margin-bottom: 14px; }
+  h3 { font-size: 18px; margin-bottom: 4px; }
+  p { margin: 0 0 12px; }
+  code { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 0.9em;
+         background: var(--code-bg); padding: 1px 6px; border-radius: 5px; }
+  pre { margin: 10px 0 0; background: var(--code-bg); border-radius: 8px; padding: 12px 14px;
+        white-space: pre; overflow-x: auto; overflow-wrap: normal; font-size: 14.5px; line-height: 1.5; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+  section { padding: 64px 0; }
+  section.alt { background: var(--bg-alt); }
+
+  /* ---- top bar ------------------------------------------------------------------ */
+  .top { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+  .mark { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 700; font-size: 19px; text-decoration: none; }
+  .mark svg { width: 30px; height: 30px; flex: none; }
+  .top nav a { color: var(--muted); text-decoration: none; margin-left: 20px; font-size: 15px; }
+  .top nav a:hover { color: var(--text); }
+
+  /* ---- hero --------------------------------------------------------------------- */
+  .hero { padding: 48px 0 40px; text-align: center; }
+  .hero h1 { font-size: 52px; letter-spacing: -1.2px; max-width: 800px; margin: 0 auto; }
+  .hero h1 em { font-style: normal; color: var(--needs-you); }
+  .hero .lead { font-size: 20px; max-width: 680px; margin: 20px auto 0; }
+  .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 30px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 22px; border-radius: 10px;
+         font-weight: 600; font-size: 16px; text-decoration: none; }
+  .btn svg { width: 18px; height: 18px; flex: none; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.ghost { color: var(--text); box-shadow: inset 0 0 0 1.5px var(--line); }
+  .btn.ghost:hover { box-shadow: inset 0 0 0 1.5px var(--muted); }
+  .meta { margin-top: 16px; font-size: 14px; color: var(--muted); }
+
+  /* ---- demo slot ---------------------------------------------------------------- */
+  .demo { margin: 40px auto 0; max-width: 960px; }
+  /* width and height attributes on the elements give the frame its 1280:912 shape before
+     the file arrives, so nothing below it jumps */
+  .demo video, .demo img { display: block; width: 100%; height: auto; border-radius: 12px;
+                           box-shadow: var(--shadow); background: var(--surface); }
+
+  /* ---- problem ------------------------------------------------------------------ */
+  .problem p { font-size: 19px; max-width: 760px; }
+
+  /* ---- features ----------------------------------------------------------------- */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 24px; }
+  .card { background: var(--surface); border-radius: 12px; padding: 20px; box-shadow: var(--shadow); }
+  .card p { margin: 0; font-size: 15.5px; }
+  .card.wide { grid-column: 1 / -1; }
+  .dots { display: flex; gap: 6px; margin-bottom: 12px; }
+  .dots i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+
+  /* ---- install ------------------------------------------------------------------ */
+  ol.steps { padding-left: 22px; margin: 16px 0 0; max-width: 780px; }
+  ol.steps li { margin-bottom: 18px; min-width: 0; }
+  .note { font-size: 15px; color: var(--muted); max-width: 780px; }
+
+  /* ---- phone -------------------------------------------------------------------- */
+  .phone { display: flex; gap: 28px; align-items: flex-start; }
+  .phone .pill { flex: none; font-size: 13px; font-weight: 600; color: var(--muted);
+                 border: 1.5px solid var(--line); border-radius: 999px; padding: 3px 12px; }
+  .phone ul { margin: 8px 0 12px; padding-left: 20px; }
+
+  /* ---- footer ------------------------------------------------------------------- */
+  footer { padding: 32px 0 48px; font-size: 14px; color: var(--muted); border-top: 1px solid var(--line); }
+  footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  footer a { color: var(--muted); }
+
+  /* ---- narrow screens ----------------------------------------------------------- */
+  @media (max-width: 860px) {
+    .grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 600px) {
+    body { font-size: 16px; }
+    .wrap { padding: 0 16px; }
+    section { padding: 44px 0; }
+    .top nav a:not(.gh) { display: none; }
+    .hero { padding-top: 28px; }
+    .hero h1 { font-size: 34px; letter-spacing: -0.6px; }
+    .hero .lead { font-size: 17px; }
+    .btn { width: 100%; justify-content: center; }
+    h2 { font-size: 24px; }
+    .problem p { font-size: 17px; }
+    .grid { grid-template-columns: 1fr; }
+    .phone { flex-direction: column; gap: 10px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="wrap top">
+  <a class="mark" href="#">
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="7" fill="#181818"/>
+      <rect x="5" y="5" width="10" height="10" rx="2" fill="#2e2e2e" stroke="#3a6ea5" stroke-width="1.5"/>
+      <rect x="17" y="5" width="10" height="10" rx="2" fill="#2e2e2e"/>
+      <rect x="5" y="17" width="10" height="10" rx="2" fill="#2e2e2e"/>
+      <rect x="17" y="17" width="10" height="10" rx="2" fill="#2e2e2e"/>
+      <circle cx="12" cy="12" r="1.6" fill="#2d7dd2"/><circle cx="24" cy="12" r="1.6" fill="#f39c12"/>
+      <circle cx="12" cy="24" r="1.6" fill="#2ecc71"/><circle cx="24" cy="24" r="1.6" fill="#868686"/>
+    </svg>
+    TabTower
+  </a>
+  <nav>
+    <a href="#features">Features</a>
+    <a href="#install">Install</a>
+    <a class="gh" href="https://github.com/tabtower/tabtower">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <!-- hero -->
+  <section class="hero">
+    <div class="wrap">
+      <h1>Know which Claude Code session <em>needs you</em>.</h1>
+      <p class="lead">TabTower is a free Windows app that puts every Claude Code session, from every VS Code window, on one live deck. The one waiting for you blinks, and one click takes you to its tab.</p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/tabtower/tabtower/releases/latest">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M11 3h2v10.2l3.6-3.6 1.4 1.4-6 6-6-6 1.4-1.4 3.6 3.6V3zM5 19h14v2H5z"/></svg>
+          Download for Windows
+        </a>
+        <a class="btn ghost" href="https://github.com/tabtower/tabtower">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 2.9.8.1-.6.4-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5a3.9 3.9 0 0 1 1-2.7c-.1-.3-.5-1.3.1-2.7 0 0 .8-.3 2.8 1a9.5 9.5 0 0 1 5 0c1.9-1.3 2.8-1 2.8-1 .6 1.4.2 2.4.1 2.7a3.9 3.9 0 0 1 1 2.7c0 3.9-2.3 4.7-4.6 5 .4.3.7.9.7 1.9V21c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></svg>
+          View on GitHub
+        </a>
+      </div>
+      <p class="meta">Windows 10/11 &middot; VS Code with Claude Code &middot; MIT licensed</p>
+
+      <!-- demo: a nine-second silent loop. The GIF inside is what a browser without video shows;
+           loading="lazy" keeps a browser that does play the video from fetching it as well.
+           hero-2x.mp4 is the same take with every pixel doubled (2560x1824). Video stores colour
+           at half the resolution of brightness, which dulls the 2 px card borders in the 1280
+           file; doubled, each pixel of the take has a colour sample of its own. Only a wide
+           window gets it. A narrow one, which is where a decoder limited to 1080p is most
+           likely, keeps the 1280 file. A browser too old to read media on a video source takes
+           the first source it can play, which is the 2x one. -->
+      <div class="demo">
+        <video autoplay muted loop playsinline preload="auto" width="1280" height="912"
+               aria-label="TabTower in action: a waiting session blinks orange on the deck, and one click opens its tab in VS Code">
+          <source src="assets/hero-2x.mp4" type="video/mp4" media="(min-width: 1000px)">
+          <source src="assets/hero.mp4" type="video/mp4">
+          <img src="assets/hero.gif" width="1280" height="912" loading="lazy"
+               alt="TabTower in action: a waiting session blinks orange on the deck, and one click opens its tab in VS Code">
+        </video>
+      </div>
+    </div>
+  </section>
+
+  <!-- the problem -->
+  <section class="alt problem">
+    <div class="wrap">
+      <h2>The problem</h2>
+      <p>Running one Claude Code session is easy; running five across several VS Code windows is not. A session stops to ask for permission or finishes its turn, then sits there unnoticed while you work somewhere else. The cost is the minutes between "Claude stopped" and "you looked", and TabTower turns that into a glance.</p>
+    </div>
+  </section>
+
+  <!-- features: only what the README states -->
+  <section id="features">
+    <div class="wrap">
+      <h2>What it does</h2>
+      <div class="grid">
+        <div class="card">
+          <div class="dots"><i style="background:var(--working)"></i><i style="background:var(--waiting)"></i><i style="background:var(--done)"></i><i style="background:var(--idle)"></i></div>
+          <h3>Live status per session</h3>
+          <p>Each session is a row on its workspace card, coloured by Claude Code's own hooks: blue while working, blinking orange while waiting for you, purple when it is your turn, grey when idle.</p>
+        </div>
+        <div class="card">
+          <h3>One click to the right tab</h3>
+          <p>Click a session row and the deck focuses its VS Code window, activates that session's tab and stops the blink. A closed session resumes with its full history.</p>
+        </div>
+        <div class="card">
+          <h3>Notifications that withdraw</h3>
+          <p>When the deck is buried, a session that needs you raises a Windows notification and a taskbar badge. Both go away the moment you handle it, even outside the deck.</p>
+        </div>
+        <div class="card">
+          <h3>Tokens per session</h3>
+          <p>Every session row shows the tokens it has used so far. Hover the count for the breakdown and how full the context window is now.</p>
+        </div>
+        <div class="card">
+          <h3>A tasks page, if you want one</h3>
+          <p>Point TabTower at a JSON file your own tooling writes and it lists your tasks next to your live sessions. Click a task to open a session in its workspace: a new one, or the one already linked to it.</p>
+        </div>
+        <div class="card">
+          <h3>Scriptable, and out of the way</h3>
+          <p>A full CLI over a named pipe, an optional reserved strip of the monitor that maximized windows never cover, and it starts with Windows with your layout restored.</p>
+        </div>
+        <div class="card wide">
+          <h3>One card per workspace</h3>
+          <p>Every VS Code workspace gets a card with its git branch and its sessions. A card can also show a live preview of its window, drawn by the Windows compositor with no screen capture and no code injection; switch it off to keep the deck compact.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- install -->
+  <section class="alt" id="install">
+    <div class="wrap">
+      <h2>Install</h2>
+      <p>Needs Windows 10 or 11, and VS Code with the Claude Code extension. No admin rights and no .NET runtime: the release is self-contained.</p>
+      <ol class="steps">
+        <li>
+          <a href="https://github.com/tabtower/tabtower/releases/latest">Download</a> the latest <code>TabTower-&lt;version&gt;-win-x64.zip</code> and unblock it before you extract it:
+          <pre><code>Unblock-File .\TabTower-&lt;version&gt;-win-x64.zip</code></pre>
+        </li>
+        <li>
+          Extract it anywhere and run the installer:
+          <pre><code>powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1</code></pre>
+        </li>
+      </ol>
+      <p class="note">The installer puts TabTower in your user profile, installs its companion VS Code extension (TabTower Connector) so a click can reveal the right tab, registers the Claude Code hooks after backing up your settings, and starts the app. Upgrading is the same two steps; <code>uninstall.ps1</code> removes it.</p>
+    </div>
+  </section>
+
+  <!-- phone access, optional -->
+  <section>
+    <div class="wrap phone">
+      <span class="pill">Optional</span>
+      <div>
+        <h2>Your sessions on your phone</h2>
+        <p>Off by default. Turn it on and, over your own Tailscale network, your phone can:</p>
+        <ul>
+          <li>see every open session and its status,</li>
+          <li>open a new session, or close one together with its tab,</li>
+          <li>reopen a session you just closed,</li>
+          <li>jump into the Claude app on a session that has a link there.</li>
+        </ul>
+        <p>Each new device is paired by typing the code it shows into a prompt on your PC. <a href="https://github.com/tabtower/tabtower/blob/main/docs/phone-access.md">Setup and security model</a>.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>TabTower is free and open source under the <a href="https://github.com/tabtower/tabtower/blob/main/LICENSE">MIT license</a>. An independent project, not affiliated with Anthropic.</span>
+    <a href="https://github.com/tabtower/tabtower">github.com/tabtower/tabtower</a>
+  </div>
+</footer>
+
+</body>
+</html>

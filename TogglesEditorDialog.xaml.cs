@@ -29,7 +29,7 @@ public partial class TogglesEditorDialog : Window
         public bool IdLocked { get; init; }
 
         public string IdHint => IdLocked
-            ? "The id is set on creation and cannot be changed — external processes rely on this path"
+            ? "The id is set on creation and cannot be changed: external processes rely on this path"
             : "The flag file name. Fixed once you confirm";
 
         private string _id = "";
@@ -80,7 +80,7 @@ public partial class TogglesEditorDialog : Window
         string id = ToggleStore.Sanitize(row.Id.Trim());
         if (id.Length == 0)
         {
-            Warn("Give the toggle an id first — it is the flag file name");
+            Warn("Give the toggle an id first: it is the flag file name");
             return;
         }
         string path = Path.Combine(ToggleStore.Dir, id);
@@ -90,7 +90,7 @@ public partial class TogglesEditorDialog : Window
         DetailsPath.Text = path;
         DetailsState.Text = File.Exists(path)
             ? $"{(ToggleStore.Read(id, row.DefaultOn) ? "1 (on)" : "0 (off)")}"
-            : $"No file yet — the default ({(row.DefaultOn ? "1 / on" : "0 / off")}) will be written on OK";
+            : $"No file yet: the default ({(row.DefaultOn ? "1 / on" : "0 / off")}) will be written on OK";
         DetailsCli.Text = $"tabtower toggle get {id}\r\n" +
                           $"tabtower toggle set {id} on\r\n" +
                           $"tabtower toggle set {id} off";
@@ -140,7 +140,7 @@ public partial class TogglesEditorDialog : Window
         }
         catch
         {
-            Warn("Copying to the clipboard failed — try again");
+            Warn("Copying to the clipboard failed, try again");
         }
     }
 
@@ -158,7 +158,7 @@ public partial class TogglesEditorDialog : Window
             if (id.Length == 0 && name.Length == 0) continue;
             if (id.Length == 0)
             {
-                Warn($"Toggle \"{name}\" has no id — the id is the flag file name");
+                Warn($"Toggle \"{name}\" has no id: the id is the flag file name");
                 return;
             }
             if (!seen.Add(id))

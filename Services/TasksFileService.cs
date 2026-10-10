@@ -74,9 +74,9 @@ public static class TasksFileService
         {
             var t = doc.Tasks[i];
             if (string.IsNullOrWhiteSpace(t.Id))
-                warnings.Add($"Record {i + 1}: no id — skipped");
+                warnings.Add($"Record {i + 1}: no id, skipped");
             else if (string.IsNullOrWhiteSpace(t.Name))
-                warnings.Add($"{t.Id}: no name — skipped");
+                warnings.Add($"{t.Id}: no name, skipped");
             else
                 valid.Add(t);
         }

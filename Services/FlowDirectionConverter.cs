@@ -29,6 +29,17 @@ public sealed class FlowDirectionConverter : IValueConverter
           or >= '؀' and <= 'ۿ'      // Arabic
           or >= 'יִ' and <= 'ﭏ';     // Hebrew presentation forms
 
+    /// <summary>True when the text has a right-to-left letter ANYWHERE in it, not only as its
+    /// first strong character. The question a whole list asks before it picks one side for
+    /// every name in it (see TasksPanelViewModel.Apply).</summary>
+    public static bool ContainsRtl(string? text)
+    {
+        if (text == null) return false;
+        foreach (char c in text)
+            if (IsRtl(c)) return true;
+        return false;
+    }
+
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         => throw new NotSupportedException();
 }

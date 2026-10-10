@@ -173,6 +173,7 @@ public partial class MainWindow : Window
         _tasksFollowGroups = config.TasksFollowGroups;
         _badgesFile = config.BadgesFile;
         _fastWords = config.FastWords;
+        LoadPhoneConfig(config);
         // Schema 7: the session card gained a chip naming the window it runs in, drawn in that
         // window's own colour. Groups seeded earlier carry no colour and would draw grey.
         if (config.SchemaVersion < 7 && AppConfig.FillMissingGroupColors(_sessionGroups) is > 0 and var coloured)
@@ -385,6 +386,9 @@ public partial class MainWindow : Window
             (sync, conn) => Dispatcher.BeginInvoke(() => OnVscodeSync(sync, conn)),
             conn => Dispatcher.BeginInvoke(() => OnVscodeClosed(conn)));
         _pipe.Start();
+
+        // Off unless the user turned it on (⚙ → Phone access).
+        ApplyPhoneAccess();
     }
 
     /// <summary>Set before the pipe is torn down. Disposing PipeServer cancels every
@@ -399,6 +403,7 @@ public partial class MainWindow : Window
         _shuttingDown = true;
         LogService.Info("app", "quit");
         _configStore.SaveNow();
+        StopPhoneServer();
         _pipe?.Dispose();
         _tracker.Dispose();
         _appBar.Remove();
@@ -437,6 +442,7 @@ public partial class MainWindow : Window
             TasksFollowGroups = _tasksFollowGroups,
             BadgesFile = _badgesFile,
             FastWords = _fastWords,
+            PhoneAccess = BuildPhoneConfig(),
             Zone = new ZoneConfig { Monitor = Vm.ZoneMonitor, Mode = ModeNames.ToName(Vm.ZoneMode), Size = Vm.ZoneSize },
             Stage = new StageConfig
             {
@@ -943,8 +949,8 @@ public partial class MainWindow : Window
         int open = Vm.Workspaces.Sum(w => w.Sessions.Count(s => !s.Closed));
         LogService.Info("status", $"reconcile: closed {closed}, {open} session(s) still open");
         return (closed == 0
-            ? $"Nothing to clean up — all {open} open session(s) match a live tab"
-            : $"Cleaned up {closed} session(s) whose tab or window is gone — {open} still open", true);
+            ? $"Nothing to clean up: all {open} open session(s) match a live tab"
+            : $"Cleaned up {closed} session(s) whose tab or window is gone, {open} still open", true);
     }
 
     /// <summary>Close sessions whose host died without a SessionEnd hook. Two shapes:
@@ -1962,7 +1968,7 @@ public partial class MainWindow : Window
         string process = WindowEnumerator.GetProcessName(root);
         if (!WorkspaceMetadata.IsVsCodeProcess(process))
         {
-            SetStatus("Only VSCode windows are supported on the deck (decision 13)");
+            SetStatus("Only VS Code windows are supported on the deck (decision 13)");
             return;
         }
 
@@ -2133,6 +2139,7 @@ public partial class MainWindow : Window
         ws.Sessions.Insert(0, session);
         ws.RefreshSessionVisibility();
         AfterSessionChange(ws, session);
+        NotifySessionCreated(ws, session);
         return ($"session {sessionId} started in \"{ws.DisplayTitle}\" [idle]", true);
     }
 
@@ -2148,7 +2155,7 @@ public partial class MainWindow : Window
         session.LastEventAt = DateTime.Now;
         session.OrphanSince = null;   // any hook event is proof of life — restart the orphan clock
         session.TabGoneAt = null;     // ...and it speaks for the tab witness too: it is alive somewhere
-        if (info.Detail != null && !IsMachineWakeup(info.Detail)) session.Detail = Sanitize(info.Detail);
+        if (info.Detail != null && !IsMachineWakeup(info.Detail)) session.Detail = PermissionWait.ForCard(info.Detail, Sanitize);
         if (info.Transcript != null) session.TranscriptPath = info.Transcript;
         if (info.Source != null) session.Source = info.Source;
         if (info.Mode != null) session.PermissionMode = info.Mode;
@@ -2201,8 +2208,12 @@ public partial class MainWindow : Window
     /// another session is a real instruction and stays, unwrapped by Sanitize; a permission
     /// subject and a StopFailure reason are more urgent than anything the user typed and stay
     /// too.</summary>
+    /// <remarks>Also true for an injected block a hook older than 0.11.15 cut short (see
+    /// InjectedPrefix.StartsWithUnclosedBlock): with the browser extension connected, its 400
+    /// characters were the start of that block and none of the user's words.</remarks>
     private static bool IsMachineWakeup(string detail)
-        => detail.TrimStart().StartsWith("<task-notification", StringComparison.Ordinal);
+        => detail.TrimStart().StartsWith("<task-notification", StringComparison.Ordinal) ||
+           InjectedPrefix.StartsWithUnclosedBlock(detail);
 
     /// <summary>Hook details (prompts, messages) become one bounded display line.</summary>
     private static string Sanitize(string s)
@@ -2213,6 +2224,8 @@ public partial class MainWindow : Window
         // was said.
         // Everything from the closing tag on is the harness's own guidance to the receiving
         // session ("This came from another Claude session…"), not the message.
+        // Blocks the harness puts in front of the prompt go first (see InjectedPrefix).
+        s = InjectedPrefix.Strip(s);
         s = Regex.Replace(s, @"^\s*Another Claude session sent a message:\s*", "");
         s = Regex.Replace(s, @"^\s*<cross-session-message\b[^>]*>\s*", "");
         s = Regex.Replace(s, @"\s*</cross-session-message>[\s\S]*$", "");
@@ -2445,7 +2458,7 @@ public partial class MainWindow : Window
                 // deck with a status command by hand.
                 LogService.Info("status", $"session={sessionId} is closed ({session.EndReason ?? "?"}) — " +
                                           $"{SessionStatusNames.ToName(status)} not applied");
-                return ($"session {sessionId} is closed — status not changed", false);
+                return ($"session {sessionId} is closed, status not changed", false);
             }
         }
         // The session is doing something again, so the post-mortem has served its purpose.
@@ -2539,7 +2552,7 @@ public partial class MainWindow : Window
             LogService.Info("status", $"session={sessionId} ended (never materialized — removed)");
             ws.Sessions.Remove(session);
             AfterSessionChange(ws, session);
-            return ($"session {sessionId} ended (empty — removed)", true);
+            return ($"session {sessionId} ended (empty, removed)", true);
         }
         LogService.Info("status", $"session={sessionId} ended{(info.Reason is { Length: > 0 } r ? $" ({r})" : "")}");
         session.Closed = true;
@@ -2766,8 +2779,8 @@ public partial class MainWindow : Window
                 LogService.Info("open", $"click session={session.SessionId} ws=\"{ws.DisplayTitle}\" " +
                                         (closing ? "closeSession sent" : $"closeSession FAILED: {why}"));
                 SetStatus(closing
-                    ? $"Closing the dead tab of \"{session.DisplayTitle}\" — the card goes once it is gone"
-                    : $"\"{session.DisplayTitle}\" — {why}");
+                    ? $"Closing the dead tab of \"{session.DisplayTitle}\"; the card goes once it is gone"
+                    : $"\"{session.DisplayTitle}\": {why}");
                 return;
             }
             // NEVER reveal a dead session's tab, whatever the extension can do. Revealing it is
@@ -2782,8 +2795,8 @@ public partial class MainWindow : Window
             string ext = target == null ? "no connector" : target.Version.Length > 0 ? $"extension {target.Version}" : "an extension before 0.6.12";
             LogService.Info("open", $"click session={session.SessionId} ws=\"{ws.DisplayTitle}\" replaced — NOT revealed ({ext})");
             SetStatus(session.OpenAsTab
-                ? $"\"{session.DisplayTitle}\" is a dead session — close its tab by hand; this window runs {ext}, which cannot close tabs (reload the window to update it). Not revealed: revealing would revive it."
-                : $"\"{session.DisplayTitle}\" is a dead session with no tab left — its card goes on the next sweep");
+                ? $"\"{session.DisplayTitle}\" is a dead session: close its tab by hand; this window runs {ext}, which cannot close tabs (reload the window to update it). Not revealed: revealing would revive it."
+                : $"\"{session.DisplayTitle}\" is a dead session with no tab left; its card goes on the next sweep");
             return;
         }
         RebindToConnectorWindow(ws, target);
@@ -2794,7 +2807,7 @@ public partial class MainWindow : Window
         // (issue 2026-07-19 — e.g. sessions from before a folder rename). Don't send.
         if (!CanResume(ws, session))
         {
-            SetStatus($"\"{session.DisplayTitle}\" — session file not found (did the project move or get renamed?); opening it would start a new conversation, so it was cancelled");
+            SetStatus($"\"{session.DisplayTitle}\": session file not found (did the project move or get renamed?); opening it would start a new conversation, so it was cancelled");
             return;
         }
         // Say something either way. This used to be `if (sent)`, so every failure - no
@@ -2808,8 +2821,8 @@ public partial class MainWindow : Window
         LogService.Info("open", $"click session={session.SessionId} ws=\"{ws.DisplayTitle}\" " +
                                 (sent ? "sent" : $"FAILED: {reason}"));
         SetStatus(sent
-            ? $"Opening the session in VSCode: {session.DisplayTitle}"
-            : $"\"{session.DisplayTitle}\" — {reason}");
+            ? $"Opening the session in VS Code: {session.DisplayTitle}"
+            : $"\"{session.DisplayTitle}\": {reason}");
     }
 
     /// <summary>Resume looks the id up in the workspace's CURRENT transcripts folder — a
@@ -3790,9 +3803,12 @@ public partial class MainWindow : Window
     // flipped green/purple twice a second, which is exactly what was seen. The hook's
     // --group is the only source, and it reads the session's own config-dir variable.
     /// <summary>Open/resume the session's tab in VSCode. Without a live connector the request
-    /// is parked; it's flushed when the extension connects (VSCode may still be launching).</summary>
+    /// is parked; it's flushed when the extension connects (VSCode may still be launching).
+    /// <paramref name="allowTerminal"/> false: never resume through `claude --resume` in a
+    /// terminal; a session with no tab is resumed into a Claude Code panel in its own window
+    /// (`claude-vscode.editor.open` with the id starts the CLI with --resume there).</summary>
     public (bool, string) OpenSessionInVscode(WorkspaceViewModel ws, SessionViewModel session,
-                                              VscodeConnection? conn = null)
+                                              VscodeConnection? conn = null, bool allowTerminal = true)
     {
         conn ??= FindConnector(ws, session);
         if (conn == null)
@@ -3805,7 +3821,7 @@ public partial class MainWindow : Window
                 return QueueGroupSession(ws, null, home, session.SessionId);
             if (ws.Path.Length > 0)
                 _pendingOpens[WorkspaceMetadata.NormalizePath(ws.Path)] = (session.SessionId, null, null, DateTime.Now);
-            return (false, "no VSCode connector for this workspace yet — request queued");
+            return (false, "no VSCode connector for this workspace yet; request queued");
         }
         // A session whose tab is nowhere in this instance is not going to be REVEALED — Claude
         // Code's id→panel registry lives in the window, and a session whose window died is not
@@ -3836,7 +3852,7 @@ public partial class MainWindow : Window
         {
             LogService.Info("route", $"session={session.SessionId} NOT resumed — its tab " +
                                      $"\"{session.MatchedTabLabel}\" was closed at {gone:HH:mm:ss}");
-            return (false, $"\"{session.DisplayTitle}\" ended when you closed its tab at {gone:HH:mm} — " +
+            return (false, $"\"{session.DisplayTitle}\" ended when you closed its tab at {gone:HH:mm}: " +
                            "not resumed, because resuming would start it up again. The card clears itself shortly.");
         }
         // The other consumer of "no tab matched", and the more dangerous one — CLAUDE.md names
@@ -3851,8 +3867,10 @@ public partial class MainWindow : Window
         // path applied. Revealing instead is the right fallback and always was: Claude Code's own
         // id→panel registry is the one thing that can find a tab the label cannot.
         bool tablessProven = !tabIsHere && ws.UnexplainedTabs == 0;
-        bool viaTerminal = tablessProven && conn.SupportsTerminalResume;
-        if (!tabIsHere && !tablessProven)
+        bool viaTerminal = allowTerminal && tablessProven && conn.SupportsTerminalResume;
+        if (!tabIsHere && tablessProven && !allowTerminal)
+            LogService.Info("route", $"session={session.SessionId} → panel resume in its own window (terminal not allowed by the caller)");
+        else if (!tabIsHere && !tablessProven)
             LogService.Info("route", $"session={session.SessionId} revealed, NOT resumed — " +
                                      $"{ws.UnexplainedTabs} tab(s) here answer to nobody and one may be its");
         else if (!tabIsHere && !conn.SupportsTerminalResume)
@@ -3885,7 +3903,7 @@ public partial class MainWindow : Window
     private (bool, string) RequestCloseReplacedTab(WorkspaceViewModel ws, SessionViewModel session,
                                                    VscodeConnection? conn = null)
     {
-        if (session.CloseTabAttempts >= CloseTabMaxAttempts) return (false, "gave up closing its tab after 3 tries — close it by hand");
+        if (session.CloseTabAttempts >= CloseTabMaxAttempts) return (false, "gave up closing its tab after 3 tries; close it by hand");
         if (session.CloseTabRequestedAt is { } last && DateTime.Now - last < CloseTabRetry) return (false, "close already requested");
         // Every outcome below spends an attempt, not only a send: a window whose extension
         // cannot close tabs would otherwise be re-asked on every 10s sweep for as long as the
@@ -3897,7 +3915,7 @@ public partial class MainWindow : Window
         if (conn == null) return (false, "no VSCode connector for this workspace");
         if (!conn.SupportsCloseSession)
         {
-            string why = $"the VSCode window's TabTower extension ({(conn.Version.Length > 0 ? conn.Version : "pre-0.6.12")}) cannot close tabs — reload that window to update it, or close the tab by hand";
+            string why = $"the VSCode window's TabTower extension ({(conn.Version.Length > 0 ? conn.Version : "pre-0.6.12")}) cannot close tabs: reload that window to update it, or close the tab by hand";
             if (session.CloseTabAttempts == 1)
                 LogService.Info("close", $"session={session.SessionId} closeSession NOT sent to pid={conn.Pid}: {why}");
             return (false, why);
@@ -3948,13 +3966,13 @@ public partial class MainWindow : Window
         // session that died without the deck hearing about it, which no liveness check can
         // answer here - a pid outlives its process and Windows recycles them.
         if (session.Status == SessionStatus.Replaced)
-            return (false, "this session was replaced by a successor and its process was ended — the deck closes its tab on its own, by label, because revealing a dead session revives it");
+            return (false, "this session was replaced by a successor and its process was ended; the deck closes its tab on its own, by label, because revealing a dead session revives it");
         if (session.Closed)
-            return (false, "this session has already ended — revealing it would resume it off its transcript, so its tab is left for you to close. Pass --close-tab to `session end` instead, which asks while the session is still alive");
+            return (false, "this session has already ended: revealing it would resume it off its transcript, so its tab is left for you to close. Pass --close-tab to `session end` instead, which asks while the session is still alive");
         var conn = FindConnector(ws, session);
         if (conn == null) return (false, "no VSCode connector for this workspace");
         if (!conn.SupportsCloseSessionById)
-            return (false, $"the VSCode window's TabTower extension ({(conn.Version.Length > 0 ? conn.Version : "pre-0.6.12")}) cannot close a tab by session id — reload that window to update it");
+            return (false, $"the VSCode window's TabTower extension ({(conn.Version.Length > 0 ? conn.Version : "pre-0.6.12")}) cannot close a tab by session id: reload that window to update it");
         var labels = TabLabelsOf(session);
         if (!conn.TrySend(new { Cmd = "closeSession", SessionId = sessionId, Labels = labels, ById = true }))
         {
@@ -3992,8 +4010,8 @@ public partial class MainWindow : Window
         {
             if (ws.Path.Length > 0)
                 _pendingOpens[WorkspaceMetadata.NormalizePath(ws.Path)] = (null, prompt, null, DateTime.Now);
-            SetStatus("VSCode is starting — the new session will open once the connector is up");
-            return (false, "no VSCode connector yet — request queued");
+            SetStatus("VS Code is starting; the new session will open once the connector is up");
+            return (false, "no VSCode connector yet; request queued");
         }
         // The anchor tab is only ever a LIVE session's, matched to a tab in THIS window: the
         // extension finds it by asking Claude Code to reveal the session id, and a reveal of a
@@ -4035,16 +4053,16 @@ public partial class MainWindow : Window
         _pendingOpens[WorkspaceMetadata.NormalizePath(ws.Path)] = (sessionId, prompt, group.Id, DateTime.Now);
         if (GroupWindowIsOpen(group))
         {
-            SetStatus($"{group.Name} is open but not connected yet — the {what} will start there when it is");
+            SetStatus($"{group.Name} is open but not connected yet; the {what} will start there when it is");
             return (false, $"{group.Id}: window up, connector not");
         }
         if (LaunchGroup(group))
         {
-            SetStatus($"Starting {group.Name} — the {what} will open there once it is up");
+            SetStatus($"Starting {group.Name}; the {what} will open there once it is up");
             return (false, $"{group.Id}: launching");
         }
         _pendingOpens.Remove(WorkspaceMetadata.NormalizePath(ws.Path));
-        SetStatus($"{group.Name} is not running, and the deck has no way to start it — nothing opened");
+        SetStatus($"{group.Name} is not running, and the deck has no way to start it; nothing opened");
         return (false, $"{group.Id}: not running");
     }
 
@@ -4068,13 +4086,13 @@ public partial class MainWindow : Window
             {
                 if (WindowActions.LaunchVsCode(ws.Path))
                 {
-                    SetStatus($"Launching VSCode for \"{ws.DisplayTitle}\"...");
+                    SetStatus($"Launching VS Code for \"{ws.DisplayTitle}\"...");
                     return (true, $"launching VSCode for workspace {ws.Id}");
                 }
-                SetStatus($"\"{ws.DisplayTitle}\" — launching VSCode failed");
+                SetStatus($"\"{ws.DisplayTitle}\": launching VS Code failed");
                 return (false, $"failed to launch VSCode for workspace {ws.Id}");
             }
-            SetStatus($"\"{ws.DisplayTitle}\" — no open window and no folder path");
+            SetStatus($"\"{ws.DisplayTitle}\": no open window and no folder path");
             return (false, $"workspace {ws.Id} has no bound window and no path");
         }
         WindowActions.Focus(ws.Hwnd);
@@ -4087,11 +4105,11 @@ public partial class MainWindow : Window
     {
         if (ws.State != BindState.Connected || !NativeMethods.IsWindow(ws.Hwnd))
         {
-            SetStatus($"\"{ws.DisplayTitle}\" — no open window to close");
+            SetStatus($"\"{ws.DisplayTitle}\": no open window to close");
             return;
         }
         WindowActions.Close(ws.Hwnd);
-        SetStatus($"Closing the VSCode window of \"{ws.DisplayTitle}\"...");
+        SetStatus($"Closing the VS Code window of \"{ws.DisplayTitle}\"...");
     }
 
     public (bool, string) PinWorkspace(WorkspaceViewModel ws)
@@ -4208,7 +4226,7 @@ public partial class MainWindow : Window
         // The line is an English frame around names that are often Hebrew. A leading LRM
         // pins the paragraph to LTR, so a Hebrew workspace title can't flip the whole
         // balloon line right-to-left in the shell; the name itself still renders RTL.
-        string first = $"‎{ws.DisplayTitle} — {s.DisplayTitle}: {AttentionWord(s.Status)}";
+        string first = $"‎{ws.DisplayTitle} - {s.DisplayTitle}: {AttentionWord(s.Status)}";
         return items.Count == 1 ? first : $"{first}{Environment.NewLine}and {items.Count - 1} more";
     }
 
@@ -4306,6 +4324,7 @@ public partial class MainWindow : Window
         NotificationsMenuItem.IsChecked = Vm.WindowsNotifications;
         TasksStripMenuItem.IsChecked = Vm.ShowTasksStrip;
         WindowPreviewsMenuItem.IsChecked = Vm.ShowWindowPreviews;
+        PhoneAccessMenuItem.IsChecked = _phoneConfig.Enabled;
         HeadlessSessionsMenuItem.IsChecked = Vm.ShowHeadless;
         ShowHiddenToggle.IsChecked = Vm.ShowHidden;
         ActiveOnlyToggle.IsChecked = Vm.ActiveOnly;
@@ -4644,7 +4663,7 @@ public partial class MainWindow : Window
         }
         if (Vm.TasksPanel.FindByNumber(number) is not { } task)
         {
-            SetStatus($"No task {number} in the tasks file — it may be closed, or have no directory recorded");
+            SetStatus($"No task {number} in the tasks file: it may be closed, or have no directory recorded");
             MarkRunBoxRejected(true);
             LogService.Info("tasks", $"run refused: typed \"{typed}\" resolved to number \"{number}\", " +
                                      "which is in neither the list on screen nor the launch index");

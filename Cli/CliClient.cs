@@ -28,7 +28,7 @@ public static class CliClient
         var response = Send(args);
         if (response == null)
         {
-            Console.Error.WriteLine("tabtower: no running TabTower instance — start the app first.");
+            Console.Error.WriteLine("tabtower: no running TabTower instance. Start the app first.");
             return 2;
         }
 

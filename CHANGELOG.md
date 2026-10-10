@@ -12,6 +12,132 @@ to it automatically.
 
 <!-- new releases are inserted directly below this line -->
 
+## v0.11.19 - unreleased
+
+- chore(build): the download no longer includes `TabTower.pdb`, a debug file that recorded the
+  folder the build ran in, and `TabTower.dll` no longer carries the path of that folder either.
+  A Release build now makes no debug symbols. The app itself is unchanged: the compiled code is
+  the same, method for method. A Debug build keeps its symbols.
+
+## v0.11.18 - unreleased
+
+- fix(install): installing rewrote the whole user PATH with every `%VARIABLE%` expanded and
+  changed its registry type from REG_EXPAND_SZ to REG_SZ; uninstalling did the same. Both
+  scripts now edit the registry value itself: one entry in, the same entry out, every other
+  character and the value's type exactly as they were, and nothing written when there is
+  nothing to change. `tests/user-path.tests.ps1` proves it against a scratch registry key.
+  An install of 0.11.17 or earlier has already changed the PATH of that machine; this fix
+  stops it from happening again and does not put the earlier text back.
+- fix(cli): `session end --close-tab` on a session that had already ended answered with
+  advice to pass `--close-tab` to `session end`, the command that had just been run, and
+  said the tab was left open without knowing it. It now says that the session had already
+  ended, that its tab was not asked for, and what to do if the tab is still open.
+- docs(launch): the hero, the deck image, the tasks page and the blink clip are captures of
+  0.11.17, in the app's own colours. Two images are new: the deck with window previews on,
+  which is what a first run shows, and the token chip's hover text. The README says that
+  the clip and the compact deck were recorded with previews switched off.
+- docs(launch): the landing page plays a second video file in wide windows, the same take at
+  twice the frame size, so the thin card borders keep the colours the app draws. Narrow
+  windows keep the 1280 px file.
+- docs: a click on a session "stops the blink" (the README said it "clears the alert"; the
+  row stays orange until the prompt is answered). The landing page's legend dots are the
+  app's own state colours. The README says that the `done` state reads "your turn" on the
+  deck, and that the titles of a task list share one side.
+
+## v0.11.17 - unreleased
+
+- fix(cards): the line under a session waiting on a permission dialog had three wordings,
+  depending on which source had spoken last: the `PermissionRequest` hook (`Bash: npm test`),
+  the transcript scanner (`Waiting for permission: Bash`) and Claude Code's own notification
+  (`Claude needs your permission to use Bash`). All three now open with the same words, on the
+  deck and on the phone page. The stable line is `Waiting for permission: <tool>`. While only
+  the hook has spoken, for up to ten seconds, the command it knows follows the tool:
+  `Waiting for permission: Bash: npm test`.
+- feat(tasks): in a task list where no title has a right-to-left letter, the names are drawn
+  left-aligned and start on one vertical line. A list with any right-to-left title keeps the
+  fixed right-aligned header on every card, exactly as before. The side is chosen once for the
+  whole list, on every task in the file, so a search cannot change it.
+- fix(deck): the search box was about 5 px wide on a narrow deck, such as a 40% zone. With no
+  tasks file it now takes the whole row. With one, the Run box drops to a second line while the
+  row is too narrow for both. The search box is at least 120 px at any window size.
+- fix(ui): the token chip's tooltip says what its two numbers are: the tokens used so far,
+  weighted by price, and how full the context window is now. "VS Code" is written as two words
+  in the status line, the menus, the tooltips and the installer's output. The window-preview
+  menu item said "off by default", although the preview has been on by default since 0.11.3.
+- chore(ui): plain punctuation in the app's own text (tooltips, the status line, dialogs, the
+  tasks-file contract behind Copy spec) and in the CLI's messages. The `list` output keeps its
+  format, because scripts read it.
+- docs: launch material. The README opens with a short recording, has new deck and tasks-page
+  images and writes "VS Code" in its prose; the landing page under `site/` plays the same
+  recording, gains a tile for the tasks page and no longer leads with window previews;
+  CONTRIBUTING, SECURITY and the issue and pull-request templates are in. `hooks/README.md`,
+  `ARCHITECTURE.md` and the public `CLAUDE.md` use plain punctuation. The social card from
+  before the rename is removed; the card in use is under `assets/social/`.
+
+## v0.11.15 - unreleased
+
+- fix(cards): with the Claude in Chrome extension connected, every session's second line (on the
+  deck and on the phone page) showed the start of the `<browser_instruction>` block Claude Code
+  puts in front of each prompt, and the card title skipped those prompts. Complete leading
+  blocks of that kind (`<browser_instruction>`, `<system-reminder>`, `<ide_selection>`,
+  `<command-...>`, `<pasted_content>`) are now skipped, in the hook and in the app, and the
+  user's own words are shown. A prompt that is only such a block, or that merely starts with
+  `<`, is shown as before; a cut-off block saved by an older hook is no longer shown.
+
+## v0.11.14 - unreleased
+
+- fix(install): the installer showed an old hooks version after a version bump that was not
+  cut by `release.ps1`, because only that script updated the `# Version:` header of
+  `hooks/tabtower-hook.ps1`. The header now moves with every bump, and the build stops with a
+  clear message while it differs from the app version.
+- chore(release): the notes of a release that bundles several unreleased versions are
+  taken from their sections in CHANGELOG.md instead of being written by hand.
+
+## v0.11.13 - unreleased
+
+- fix(phone): Reopen from the phone resumed the session with `claude --resume` in a VS Code
+  terminal, so it ran with no Claude Code tab and its card showed no tab. A session with no
+  tab in its window was always sent to the terminal, a route meant for a session whose window
+  died. Reopen from the phone now resumes it in a Claude Code panel in its own window, the
+  way New opens one. A click on the deck keeps its current behaviour.
+
+## v0.11.12 - unreleased
+
+- fix(phone): a session opened from the phone and closed before its first message vanished
+  instead of appearing under "Recently closed", so there was nothing to reopen and Reopen
+  looked broken. Such a session has no conversation to resume and the deck drops it on close,
+  as it always did; the phone now says so when it closes one. An open "Recently closed" list
+  refreshes after every close, so a session just closed is there to reopen at once. Every
+  phone close and reopen now logs its outcome, and a refused one (bad id, busy, unknown
+  route) logs why.
+
+## v0.11.11 - unreleased
+
+- fix(phone): a session opened from the phone did not appear in the phone's list until its
+  first message, because a session with no transcript yet counts as a phantom and phantoms
+  were hidden. Now a phantom is listed when it is evidently real (a live Claude Code process
+  registered it, or it was opened from the phone), marked "new, no message yet"; a spare id
+  with neither stays hidden, and headless runs stay hidden. After New, the page refreshes every
+  3 seconds until the new row carries its Claude app link. Close follows the same rule.
+
+## v0.11.10 - unreleased
+
+- feat(phone): optional phone page, off by default (gear menu, Phone access). Served by
+  TabTower itself on 127.0.0.1 and reached through `tailscale serve`. Lists open sessions as
+  the deck groups them; opens a new session (confirmed on the phone, returns the real session
+  id), closes a session with its tab, reopens a recently closed one, and links to the Claude
+  app when Remote Control published a link. Every new device is approved on the PC with a match
+  code and can be revoked in Phone access settings; Funnel traffic is refused. English, plus
+  Hebrew (right to left) when the phone's language asks for it. Docs: docs/phone-access.md.
+- fix(phone): hardening after review. Pairing is approved by TYPING the code shown on the
+  device into the PC prompt (a look-alike device name cannot win), closing the prompt denies,
+  and at most two requests wait at once. The Host must be a loopback name or exactly this PC's
+  own tailnet name; with no X-Forwarded-For only a loopback Host is trusted (a tcp or
+  tls-terminated forward is refused). Only listed sessions can be closed. At most 32
+  connections at a time; Transfer-Encoding must be exactly chunked and Content-Length digits
+  only. A failed `tailscale status` is cached for 10 seconds. Reopen no longer asks first;
+  new and close still do.
+
 ## v0.9.9 - 2026-08-09
 
 - chore: sync hook script version header to 0.9.9

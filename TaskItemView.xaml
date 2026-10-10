@@ -14,10 +14,27 @@
             <!-- Fixed reading order, independent of the task's language: id hard left, then
                  status, then the name filling the rest and right-aligned. Deriving the header
                  direction from the name (the Rtl converter) made a Hebrew task and an English
-                 one line up differently, which is what a scan down the list trips over. -->
+                 one line up differently, which is what a scan down the list trips over.
+
+                 One thing varies, and it varies per LIST, never per card: NameFlow, which the
+                 panel sets to the same value on every task of a load. It is LeftToRight only
+                 when no loaded title has a right-to-left letter at all. Then the names are
+                 left-aligned, and the id-and-status column takes one shared width across the
+                 list (the hosting panel is the size scope), so every name starts on the same
+                 vertical line. In every other list nothing here differs from the fixed header. -->
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto">
+                        <ColumnDefinition.Style>
+                            <Style TargetType="ColumnDefinition">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding NameFlow}" Value="LeftToRight">
+                                        <Setter Property="SharedSizeGroup" Value="TaskHead"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ColumnDefinition.Style>
+                    </ColumnDefinition>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Top" Margin="0,0,8,0">
@@ -58,8 +75,10 @@
                          hyperlink — blue and underlined. The emoji marker a producer may put
                          in the name was not enough to spot while scanning (feedback
                          07-08-2026); colour reads before the eye reaches the glyph. -->
+                    <!-- The panel stays RightToLeft, so the pin keeps its place at the card's edge
+                         in both kinds of list; only the name's own text takes the list's side. -->
                     <TextBlock Text="{Binding Name}" Foreground="White" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=12}"
-                               FontWeight="SemiBold" TextWrapping="Wrap">
+                               FontWeight="SemiBold" TextWrapping="Wrap" FlowDirection="{Binding NameFlow}">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
                                 <Style.Triggers>
@@ -124,7 +143,7 @@
                 </StackPanel.Resources>
                 <Button x:Name="TargetButton" Content="{Binding TargetButtonText}"
                         Click="Target_Click"
-                        ToolTip="Open a session for this task — an existing one, or a new one in its workspace. A held modifier picks the session group; with TasksFollowGroups on, Shift keeps the task in its own folder">
+                        ToolTip="Open a session for this task: an existing one, or a new one in its workspace. A held modifier picks the session group; with TasksFollowGroups on, Shift keeps the task in its own folder">
                     <Button.Style>
                         <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                             <Style.Triggers>

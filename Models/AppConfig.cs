@@ -364,6 +364,16 @@ public class WindowBounds
     public bool Maximized { get; set; }
 }
 
+/// <summary>The built-in phone page: whether it runs, on which loopback port, and which tailnet
+/// devices the user approved (by Tailscale node StableID).</summary>
+public class PhoneAccessConfig
+{
+    public const int DefaultPort = 7055;
+    public bool Enabled { get; set; }
+    public int Port { get; set; } = DefaultPort;
+    public List<Services.Phone.PairedDevice> Devices { get; set; } = new();
+}
+
 public class AppConfig
 {
     /// <summary>The chip colour a group is drawn in when its config carries none. Known only for
@@ -504,6 +514,10 @@ public class AppConfig
     /// <summary>Extra words the Run box accepts, after a task number, to ask for that task's
     /// fast variant. "fast" always works; this is for other languages.</summary>
     public List<string> FastWords { get; set; } = new();
+
+    /// <summary>The phone page (⚙ → Phone access). Off by default; see docs/phone-access.md.
+    /// A config saved before it existed deserializes to the defaults, which is the off state.</summary>
+    public PhoneAccessConfig PhoneAccess { get; set; } = new();
 
     public ZoneConfig Zone { get; set; } = new();
     public StageConfig Stage { get; set; } = new();

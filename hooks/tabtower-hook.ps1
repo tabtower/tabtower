@@ -1,5 +1,5 @@
 ﻿# TabTower hook bridge for Claude Code.
-# Version: 0.11.9  (parsed by install.ps1 — keep in sync with TabTower.csproj; release.ps1 syncs automatically)
+# Version: 0.11.19  (parsed by install.ps1 — must equal TabTower.csproj <Version>; the build fails otherwise)
 # Called by Claude Code hooks with the event name as argument; the hook payload
 # (session_id, cwd, transcript_path, permission_mode + event-specific fields)
 # arrives as JSON on stdin. Everything the payload provides is forwarded to
@@ -35,6 +35,30 @@ function Get-Trimmed([string]$s, [int]$max = 400) {
     return $s
 }
 
+# The prompt without the blocks Claude Code puts in front of the user's words (with the browser
+# extension connected, a ~4,000-character <browser_instruction> block), so the 400 characters
+# Get-Trimmed keeps are the user's and not the block's. Same rule as Services/InjectedPrefix.cs:
+# only complete leading <name ...>...</name> pairs whose name has a _ or -, never the
+# cross-session-message envelope, and the original text when nothing would be left.
+function Remove-InjectedPrefix([string]$s) {
+    if (-not $s) { return $s }
+    $rest = $s
+    $stripped = $false
+    while ($true) {
+        $m = [regex]::Match($rest, '^\s*<([A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)+)(?:\s[^<>]*)?>')
+        if (-not $m.Success -or $m.Groups[1].Value -ceq 'cross-session-message') { break }
+        $close = '</' + $m.Groups[1].Value + '>'
+        $end = $rest.IndexOf($close, $m.Length, [StringComparison]::Ordinal)
+        if ($end -lt 0) { break }
+        $rest = $rest.Substring($end + $close.Length)
+        $stripped = $true
+    }
+    if (-not $stripped) { return $s }
+    $rest = $rest.Trim()
+    if ($rest) { return $rest }
+    return $s
+}
+
 # A readable subject for a permission dialog: the tool plus whatever argument identifies
 # the operation. tool_input differs per tool, so probe the usual keys in order.
 function Get-PermissionSubject($p) {
@@ -49,6 +73,20 @@ function Get-PermissionSubject($p) {
     }
     if ($arg) { return "${tool}: $arg" }
     return $tool
+}
+
+# The card line for a permission dialog. One wording for one state: the transcript scanner and
+# Claude Code's own Notification message describe the same dialog, and all three open with
+# "Waiting for permission: <tool>" (Services/PermissionWait.cs is the app's half of this rule).
+# This hook is the only one of the three that knows the argument, so it puts it after the tool:
+# "Waiting for permission: Bash: npm test". The subject is trimmed on its own, to the same 400
+# characters as when it was the whole line, so the lead takes nothing from the command. The
+# scanner replaces the line with the plain "Waiting for permission: Bash" when it confirms the
+# call, up to ten seconds later, exactly as it always replaced this hook's line.
+function Get-PermissionWaitText($p) {
+    $subject = Get-Trimmed (Get-PermissionSubject $p)
+    if ($subject) { return "Waiting for permission: $subject" }
+    return 'Waiting for permission'
 }
 
 # Is this session a `claude -p` run rather than one a human opened? CLAUDE_CODE_ENTRYPOINT is
@@ -99,7 +137,7 @@ switch ($HookEvent) {
     }
     'UserPromptSubmit' {
         $cliArgs = @('session', 'status', '--id', $sid, '--state', 'working')
-        $prompt = Get-Trimmed $payload.prompt
+        $prompt = Get-Trimmed (Remove-InjectedPrefix $payload.prompt)
         if ($prompt)                  { $cliArgs += @('--detail', $prompt) }
     }
     'Notification' {
@@ -113,8 +151,7 @@ switch ($HookEvent) {
     # to the transcript scanner (see MainWindow.SetSessionStatus).
     'PermissionRequest' {
         $cliArgs = @('session', 'status', '--id', $sid, '--state', 'waiting')
-        $detail = Get-Trimmed (Get-PermissionSubject $payload)
-        if (-not $detail)             { $detail = 'Waiting for permission' }
+        $detail = Get-PermissionWaitText $payload
         $cliArgs += @('--detail', $detail, '--permission-dialog')
     }
     # A turn can end while the session is not free at all: subagents launched with

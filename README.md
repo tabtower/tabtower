@@ -2,51 +2,87 @@
 
 **A Windows control deck for your running Claude Code sessions.**
 
-TabTower tiles every VSCode window into a live grid and shows each Claude Code session inside it as a status card — grey when idle, blue while working, blinking orange when Claude is waiting for you, purple when the turn is done, green when the session has been wrapped up for good, white when it handed off to a successor and closed itself. One click focuses the window, activates the right tab, and clears the alert.
+With several Claude Code sessions running at once, the hard part is knowing when one needs you. A session stops to ask for permission or finishes its turn, then waits unnoticed while you work in another VS Code window. TabTower puts every session on one live deck, blinks the one that is waiting for you, and takes you straight to it in one click.
 
-**Built for one setup, on purpose:** Claude Code running inside **VSCode** — through its [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code) — on **Windows 10/11**. A session is a VSCode tab here, and that assumption runs through the whole tool.
+![TabTower in action: a waiting session blinks orange on the deck, and one click opens its tab in VS Code](site/assets/hero.gif)
 
-![The TabTower window: four workspace cards, each with a live thumbnail and its sessions](assets/screenshots/deck.png)
+> Actively developed. MIT licensed. [Latest release](https://github.com/tabtower/tabtower/releases/latest) · [changelog](CHANGELOG.md)
 
-> Actively developed. MIT licensed. — [latest release](https://github.com/tabtower/tabtower/releases/latest) · [changelog](CHANGELOG.md)
+## Install
+
+**Requirements:** Windows 10/11, and VS Code with the Claude Code extension. No admin rights, and no .NET runtime: the release build is self-contained.
+
+1. Download `TabTower-<version>-win-x64.zip` from [Releases](https://github.com/tabtower/tabtower/releases), then unblock it **before** extracting: Windows marks downloaded files, and the mark spreads to everything you extract out of the zip:
+
+   ```powershell
+   Unblock-File .\TabTower-<version>-win-x64.zip
+   ```
+
+   Already extracted? `Get-ChildItem -Recurse | Unblock-File` inside the folder does the same.
+
+2. Extract it anywhere and run the installer (no admin rights required, everything is per-user):
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+   ```
+
+That's it. The script installs to `%LOCALAPPDATA%\Programs\TabTower`, adds it to your user PATH, installs the VS Code extension, registers the Claude Code hooks in `~/.claude/settings.json` (after backing it up) and starts the app. It ends with a summary of the three installed versions: app, extension, hooks.
+
+Upgrading, uninstalling and building from source are under [Getting started](#getting-started).
 
 ---
 
+TabTower tiles every VS Code window into a live grid and shows each Claude Code session inside it as a status card: grey when idle, blue while working, blinking orange when Claude is waiting for you, purple when the turn is done, green when the session has been wrapped up for good, white when it handed off to a successor and closed itself. One click focuses the window, activates the right tab, and stops the blink.
+
+<img src="assets/screenshots/deck.png" width="380" alt="The TabTower deck: four workspace cards, each with its git branch and its Claude Code sessions in different states">
+
+![The TabTower deck with window previews on: four workspace cards in two columns, each with a live picture of its VS Code window above its session row](assets/screenshots/grid.png)
+
+*The clip at the top of this page and the compact deck above were recorded with window previews switched off; they are on by default, as in this second picture.*
+
+**Built for one setup, on purpose:** Claude Code running inside **VS Code** (through its [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)) on **Windows 10/11**. A session is a VS Code tab here, and that assumption runs through the whole tool.
+
 ## The problem
 
-Running one Claude Code session is easy. Running five is not — and the expensive part isn't the work, it's *noticing*. A session finishes, or stops to ask permission, and then sits there while you are heads-down in another window. The cost is the minutes between "Claude stopped" and "you looked".
+Running one Claude Code session is easy. Running five is not, and the expensive part isn't the work, it's *noticing*. A session finishes, or stops to ask permission, and then sits there while you are heads-down in another window. The cost is the minutes between "Claude stopped" and "you looked".
 
 TabTower turns that into a glance. A blinking orange border means *some* session needs an answer:
 
 ![A session card blinking orange while Claude waits for permission](assets/screenshots/blink.gif)
 
-Click it, and the deck focuses the VSCode window, reveals that session's tab, and stops the blink. If you answer the session directly in VSCode instead, the deck notices and stops blinking on its own.
+Click it, and the deck focuses the VS Code window, reveals that session's tab, and stops the blink. If you answer the session directly in VS Code instead, the deck notices and stops blinking on its own.
 
 ## Features
 
-- **Live window grid** — real DWM thumbnails (`DwmRegisterThumbnail`), rendered by the Windows compositor. No screen capture, no code injection, near-zero CPU.
-- **Workspace cards** — one card per VSCode workspace, showing the project name and the current git branch. Workspaces are persistent: a card survives closing the window and re-binds automatically when a matching window reappears.
-- **Session cards** — one sub-card per Claude Code session, with a status-coloured border driven by Claude Code hooks (`idle` / `working` / `waiting` / `done` / `error`), plus two set from outside: `wrapped` for a session you have closed out yourself, and `replaced` for one that handed its work to a new session and was then killed — its dead tab is the only thing left, the deck has the connector close that tab for you, and the card is swept the moment the tab is gone. The status → colour/blink mapping lives in config, not in code.
-- **Click to resume** — clicking a session card focuses the VSCode window, activates that session's tab (via the companion extension), and acknowledges the blink. A closed session resumes with its full history.
-- **Windows notifications** — when the deck itself might be buried, a session that needs attention escalates to a native notification and a taskbar badge — and both withdraw the moment the cause is gone, including when you handle it outside the deck.
-- **Reserved Zone** — TabTower can claim a quarter, half, or any custom fraction up to 90% (e.g. `2/7`) of a monitor as an AppBar, so maximized windows and snap never cover it. While zoned, the window is locked in place until the zone is turned off. To hand the deck a *whole* monitor, leave the zone off, maximize it and turn 📌 on: a reservation that leaves its monitor no work area at all is accepted by Windows and then sends the shell into a spin, so the deck will not ask for one.
-- **Stage / Pin** — define a target rectangle once, then send any window to it from the UI or the CLI.
-- **Full CLI** — everything is scriptable over a named pipe, with a <100ms round trip so hooks stay cheap.
+- **Workspace cards**: one card per VS Code workspace, showing the project name and the current git branch. Workspaces are persistent: a card survives closing the window and re-binds automatically when a matching window reappears.
+- **Session cards**: one sub-card per Claude Code session, with a status-coloured border driven by Claude Code hooks (`idle` / `working` / `waiting` / `done` / `error`; on the deck `done` reads *your turn*), plus two set from outside: `wrapped` for a session you have closed out yourself, and `replaced` for one that handed its work to a new session and was then killed; its dead tab is the only thing left, the deck has the connector close that tab for you, and the card is swept the moment the tab is gone. The status → colour/blink mapping lives in config, not in code.
+- **Per-session token count**: every session card carries a small ⛁ chip with the tokens that session has used so far, counted from its transcript and weighted by price (a cache read counts as a tenth). Hover it for the breakdown and how full the session's context window is now.<br><img src="assets/screenshots/token-tooltip.png" width="556" alt="Hovering a session's token chip: tokens used so far weighted by price, the breakdown, and how full the context window is">
+- **Per-window status badge**: an optional pill on each workspace card, fed from a JSON file your own tooling writes (a token status, say). It changes colour as its level rises, counts down to a time you give it, and disappears when the file goes stale rather than show an old number.
+- **Several Claude Code configuration directories side by side**: sessions from different `CLAUDE_CONFIG_DIR`-style setups run in separate VS Code windows on the same deck. Each session is placed in the window of its own configuration, and a session group lets you choose which one a new session opens in.
+- **Click to resume**: clicking a session card focuses the VS Code window, activates that session's tab (via the companion extension), and acknowledges the blink. A closed session resumes with its full history.
+- **Windows notifications**: when the deck itself might be buried, a session that needs attention escalates to a native notification and a taskbar badge, and both withdraw the moment the cause is gone, including when you handle it outside the deck.
+- **Live window previews**: a workspace card can show its window as a real DWM thumbnail (`DwmRegisterThumbnail`), rendered by the Windows compositor. No screen capture, no code injection, near-zero CPU. On by default; ⚙ → *Window preview on cards* switches it off to keep the deck compact.
+- **Phone access**: optional and off by default. See your open sessions on your phone over Tailscale, open a new one, close one with its tab, reopen one you just closed, and jump into the Claude app on a session that has a link there. Each new device is paired by approving it on the PC. Setup and the security model: [docs/phone-access.md](docs/phone-access.md).
+- **Reserved Zone**: TabTower can claim a quarter, half, or any custom fraction up to 90% (e.g. `2/7`) of a monitor as an AppBar, so maximized windows and snap never cover it. While zoned, the window is locked in place until the zone is turned off. To hand the deck a *whole* monitor, leave the zone off, maximize it and turn 📌 on: a reservation that leaves its monitor no work area at all is accepted by Windows and then sends the shell into a spin, so the deck will not ask for one.
+- **Stage / Pin**: define a target rectangle once, then send any window to it from the UI or the CLI.
+- **Full CLI**: everything is scriptable over a named pipe, with a <100ms round trip so hooks stay cheap.
 - **Starts with Windows** and restores the complete layout, zone and stage.
 
 ### A tasks panel, if you want one
 
-Point TabTower at a JSON file and it grows a read-only tasks panel: a full page listing your tasks next to your live sessions, and optionally a collapsed strip of task squares beside the deck (⚙ → *Tasks strip on the deck*, off by default). Click a task to open a session in its workspace — a new one, or a resume of a session already linked to it. The toolbar's **Run task** box does the same from a task number, without finding the card first.
+Point TabTower at a JSON file and it grows a read-only tasks panel: a full page listing your tasks next to your live sessions, and optionally a collapsed strip of task squares beside the deck (⚙ → *Tasks strip on the deck*, off by default). Click a task to open a session in its workspace: a new one, or a resume of a session already linked to it. The toolbar's **Run task** box does the same from a task number, without finding the card first.
 
-If the file also describes the tree its tasks came from, the page draws a two-column grid of numbered squares down its right edge — the top level, and the selected item's children — so you can see where you are and jump anywhere in a click.
+If the file also describes the tree its tasks came from, the page draws a two-column grid of numbered squares down its right edge (the top level, and the selected item's children), so you can see where you are and jump anywhere in a click.
 
 ![The tasks page: tasks on the right, live sessions grouped by workspace on the left](assets/screenshots/tasks-page.png)
 
-TabTower only ever reads the file, and reloads within a second of any change. The producer owns the content, the ordering and the status colours — the panel is deliberately agnostic about where your tasks come from. The full contract is behind the dialog's **📋 Copy spec** button. Leave the path empty and the feature does not exist.
+*Left: one square per open session, coloured by its state. Right: the tasks from your file.*
+
+TabTower only ever reads the file, and reloads within a second of any change. The producer owns the content, the ordering and the status colours; the panel is deliberately agnostic about where your tasks come from. The full contract is behind the dialog's **📋 Copy spec** button. Leave the path empty and the feature does not exist.
 
 ### Session groups: which window a new session opens in
 
-One folder can be open in several VSCode instances at once - each with its own
+One folder can be open in several VS Code instances at once - each with its own
 `--user-data-dir`, so each can run a separate Claude Code configuration. They share a single
 card, because a card is a folder, and until now a new session went to whichever of them you
 focused last: invisible, and it moves under you.
@@ -92,9 +128,9 @@ VSCode windows ──DWM thumbnails──>  TabTower (WPF)  <──── VSCode
                               transcript scanner (independent "waiting" detection)
 ```
 
-Hooks give the leading edge — immediate and certain. But `PermissionRequest` has no matching "resolved" event, so nothing tells the deck when you *answered*. TabTower therefore also scans the session transcript for a `tool_use` with no matching `tool_result` — the only signal that sees a call finish.
+Hooks give the leading edge: immediate and certain. But `PermissionRequest` has no matching "resolved" event, so nothing tells the deck when you *answered*. TabTower therefore also scans the session transcript for a `tool_use` with no matching `tool_result`, the only signal that sees a call finish.
 
-Per-tool thresholds were calibrated on 11,000+ real tool calls and chosen for **false-alarm rate**, not coverage: `Read`/`Edit`/`Write` at 15s (0.04–0.12%), `Bash`/`PowerShell` at 120s (~1%), and `Agent` excluded entirely — 37% of subagent runs legitimately exceed two minutes, so no threshold there is both useful and quiet. A false alarm teaches you to ignore the deck, which costs more than a missed one. See [`hooks/README.md`](hooks/README.md) for the full table and the reasoning.
+Per-tool thresholds were calibrated on 11,000+ real tool calls and chosen for **false-alarm rate**, not coverage: `Read`/`Edit`/`Write` at 15s (0.04-0.12%), `Bash`/`PowerShell` at 120s (~1%), and `Agent` excluded entirely: 37% of subagent runs legitimately exceed two minutes, so no threshold there is both useful and quiet. A false alarm teaches you to ignore the deck, which costs more than a missed one. See [`hooks/README.md`](hooks/README.md) for the full table and the reasoning.
 
 ## Architecture
 
@@ -110,29 +146,15 @@ Per-tool thresholds were calibrated on 11,000+ real tool calls and chosen for **
 
 No admin rights, no injection into foreign processes, per-monitor DPI aware (v2).
 
-The UI is English and left-to-right, but anything that comes from **outside** the app — workspace, session and task names, descriptions, tooltips, your search text, branch names — follows its own language, so Hebrew or Arabic content renders right-to-left inside an otherwise LTR window.
+The UI is English and left-to-right, but anything that comes from **outside** the app (workspace, session and task names, descriptions, tooltips, your search text, branch names) follows its own language, so Hebrew or Arabic content renders right-to-left inside an otherwise LTR window. One list is the exception: the titles of a task list share a single side, so one right-to-left title right-aligns every title in that list.
 
 ## Getting started
 
-**Requirements:** Windows 10/11, and VSCode with the Claude Code extension. No .NET runtime needed — the release build is self-contained.
+**Requirements:** Windows 10/11, and VS Code with the Claude Code extension. No .NET runtime needed: the release build is self-contained.
 
-A note on what depends on what: the **hooks** are what colour the cards, and they work anywhere Claude Code runs — a session in a terminal will appear on the deck with a live status like any other. What needs the VSCode extension is everything that treats a session as a *tab*: revealing it on click, the live tab titles, and the auto-acknowledge when you answer a session in VSCode without touching the deck. Neither macOS nor Linux is supported, and the window layer (DWM thumbnails, the AppBar zone) is Windows-specific enough that this is unlikely to change.
+A note on what depends on what: the **hooks** are what colour the cards, and they work anywhere Claude Code runs: a session in a terminal will appear on the deck with a live status like any other. What needs the VS Code extension is everything that treats a session as a *tab*: revealing it on click, the live tab titles, and the auto-acknowledge when you answer a session in VS Code without touching the deck. Neither macOS nor Linux is supported, and the window layer (DWM thumbnails, the AppBar zone) is Windows-specific enough that this is unlikely to change.
 
-1. Download `TabTower-<version>-win-x64.zip` from [Releases](https://github.com/tabtower/tabtower/releases), then unblock it **before** extracting — Windows marks downloaded files, and the mark spreads to everything you extract out of the zip:
-
-   ```powershell
-   Unblock-File .\TabTower-<version>-win-x64.zip
-   ```
-
-   Already extracted? `Get-ChildItem -Recurse | Unblock-File` inside the folder does the same.
-
-2. Extract it anywhere and run the installer (no admin rights required — everything is per-user):
-
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
-   ```
-
-That's it. The script installs to `%LOCALAPPDATA%\Programs\TabTower`, adds it to your user PATH, installs the VSCode extension, registers the Claude Code hooks in `~/.claude/settings.json` (after backing it up) and starts the app. It ends with a summary of the three installed versions — app, extension, hooks.
+Install with the two steps under [Install](#install) at the top of this page.
 
 **Upgrading** = download the newer zip and run `install.ps1` again; every step is idempotent. Your settings in `%APPDATA%\TabTower` survive. Uninstall with `uninstall.ps1`.
 
@@ -150,9 +172,9 @@ dotnet build -c Release          # requires the .NET 10 SDK
 
 The first launch starts the UI and the pipe server. Any later invocation with arguments acts as a CLI client against it.
 
-**Wire up the hooks** — `TabTower.exe install-hooks` merges the eleven hooks into `~/.claude/settings.json`, pointing at the hook script next to the exe (backup + idempotent; `uninstall-hooks` reverts). See [`hooks/README.md`](hooks/README.md) for what each hook does. `TabTower.exe doctor` then checks that the hooks and both VS Code extensions are in place.
+**Wire up the hooks**: `TabTower.exe install-hooks` merges the eleven hooks into `~/.claude/settings.json`, pointing at the hook script next to the exe (backup + idempotent; `uninstall-hooks` reverts). See [`hooks/README.md`](hooks/README.md) for what each hook does. `TabTower.exe doctor` then checks that the hooks and both VS Code extensions are in place.
 
-**Build the VSCode extension** (enables tab activation and live tab labels). The `.vsix` is not checked in:
+**Build the VS Code extension** (enables tab activation and live tab labels). The `.vsix` is not checked in:
 
 ```powershell
 cd vscode-extension
@@ -194,17 +216,18 @@ tabtower session list   [--workspace <name>] [--all]
 
 ## Known limitations
 
-- **An inactive VSCode tab has no thumbnail.** VSCode and DWM don't render it, so session cards are text plus a coloured border. A hard platform limit, not a missing feature.
-- **A minimized window freezes its thumbnail** on the last frame — keep tracked windows restored. Being covered by other windows is fine.
+- **An inactive VS Code tab has no thumbnail.** VS Code and DWM don't render it, so session cards are text plus a coloured border. A hard platform limit, not a missing feature.
+- **A minimized window freezes its thumbnail** on the last frame, so keep tracked windows restored. Being covered by other windows is fine.
 - Claude Code exposes no dedicated `error` hook beyond a failed turn; the `error` state exists in the model and the CLI but is mapped conservatively.
 - There is no auto-update. The app shows its version in the ⚙ menu so a bug report can name one.
 
 ## Documentation
 
-- [`CLAUDE.md`](CLAUDE.md) — how to build, test and release it, plus the settled design decisions.
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — the code map: which file owns what, and what breaks when you change it.
-- [`hooks/README.md`](hooks/README.md) — hook wiring and the waiting-detection heuristics.
-- [`vscode-extension/README.md`](vscode-extension/README.md) — the companion extension.
+- [`CLAUDE.md`](CLAUDE.md): how to build, test and release it, plus the settled design decisions.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md): the code map, which file owns what, and what breaks when you change it.
+- [`hooks/README.md`](hooks/README.md): hook wiring and the waiting-detection heuristics.
+- [`vscode-extension/README.md`](vscode-extension/README.md): the companion extension.
+- [`docs/phone-access.md`](docs/phone-access.md): the phone page, with setup, pairing, revoking, and its security model.
 
 ## License
 

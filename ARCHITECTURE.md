@@ -1,13 +1,13 @@
-# TabTower — where the code lives
+# TabTower: where the code lives
 
 A map for finding your way in, not a spec. It answers "which file do I open to change X"
 and "what will that break". The reasoning behind individual decisions lives elsewhere and
 is not repeated here:
 
-- [`CLAUDE.md`](CLAUDE.md) — build/run/test/release, and the settled decisions by number.
-- [`hooks/README.md`](hooks/README.md) — hook wiring, the waiting-detection thresholds and
+- [`CLAUDE.md`](CLAUDE.md): build/run/test/release, and the settled decisions by number.
+- [`hooks/README.md`](hooks/README.md): hook wiring, the waiting-detection thresholds and
   the measurements behind them. Authoritative for anything status-related.
-- [`README.md`](README.md) — what the product does, from a user's side.
+- [`README.md`](README.md): what the product does, from a user's side.
 
 ## The shape, in one paragraph
 
@@ -41,6 +41,7 @@ VSCode extension ─────────────────────
 | `Program.cs` | The UI-vs-CLI fork, the singleton mutex, startup-entry maintenance. 30 lines, read it first. |
 | `Cli/CliClient.cs` | Client side: argv onto the pipe, response out. Owns the `help` text. |
 | `Cli/CommandExecutor.cs` | Server side: every CLI verb. Runs **on the UI thread** (the pipe handler dispatches), so it can touch view-models directly. |
+| `Cli/SessionEndReply.cs` | The wording of what `session end --close-tab` answers. Kept apart from the executor, and free of the app, so the test harness can compile it. |
 | `Cli/HookInstaller.cs` | `install-hooks` / `uninstall-hooks`. Runs locally without a live app. Must match `hooks/README.md` exactly. |
 | `Cli/SetupCheck.cs` | `doctor`: are the hooks registered and the two VS Code extensions installed. Runs locally; the app also shows its problems once, on the very first start. |
 | `Services/PipeServer.cs` | The pipe. Two client kinds on one name, told apart by the first line: a CLI request (`{"Argv":[...]}`, one response, close) or a VSCode connector (`{"Type":"vscode-sync"}`, stays open). |
@@ -72,6 +73,12 @@ order:
 inert unless a file path is configured. Keeping it separate is deliberate: it is the one
 feature that can be removed without touching the engine.
 
+`MainWindow.Phone.cs` is the same kind of partial for the phone page (docs/phone-access.md):
+server lifecycle, the pairing prompt, and the bridge from the HTTP layer to the engine. Every
+backend call hops onto the UI thread and calls the methods the CLI calls (`NewSessionInVscode`,
+`CloseSessionTab` + `EndSession`, `OpenSessionInVscode`). A new session's id comes back through
+`SessionCreated`, raised by `StartSession` for an id the deck has never seen.
+
 ### State and view-models
 
 | File | What it owns |
@@ -97,12 +104,13 @@ feature that can be removed without touching the engine.
 | `BadgeReader.cs` | Optional per-card badges, read off a JSON file another tool writes (config.json `BadgesFile`; the format is documented in the file). One badge per session group, `""` for cards in no group. Read-only, and silent rather than wrong: no file, a file older than its own `staleAfterMinutes`, or a malformed entry all show nothing. The card-header pill is `WorkspaceViewModel.ApplyBadge`, fed by `RefreshBadges` on the 10s metadata tick. |
 | `LogService.cs` | The diagnostic log. Read it before theorising about a status bug. |
 | `ColorUtil.cs` | Named colours and `#RRGGBB`. Shared by cards, borders and the badge. |
+| `Phone/` | The phone page, free of WPF so a test harness can compile it. `LoopbackHttpServer` (a minimal HTTP/1.1 server on 127.0.0.1: HttpListener cannot be used, because http.sys rejects the `*.ts.net` Host that `tailscale serve` forwards), `PhoneServer` (the checks every request passes, and the JSON API), `TailscaleResolver` (`tailscale whois` / `status`), `PhonePairing` (approved devices, pending requests and their match codes), `ClaudeSessionLinks` (the Claude app link from `~/.claude/sessions/*.json`), and `Web/` (the page plus one `strings.<language>.json` per language, embedded). Tests: `tests/phone.tests.ps1`. |
 
 ### UI
 
 `MainWindow.xaml` is the shell: toolbar, search row, status bar, and a `Grid` that swaps the
 deck for the tasks page. `TasksPageView` is that page: live session squares on the left, the
-task list in the middle, and on the right the **navigation grid** — two vertical columns of
+task list in the middle, and on the right the **navigation grid**: two vertical columns of
 numbered squares (the tree's top level, and the selected top-level item's direct children)
 drawn from the optional `navIndex` the tasks file may carry. Column A only previews; column B
 navigates. Without a `navIndex` no grid is drawn at all. `WorkspaceCardView` is one card, and its code-behind is almost
@@ -116,11 +124,11 @@ every tooltip, menu item and combo item.
 tab/branch/focus change (carrying its own `Version` since 0.6.12), heartbeats every 2s while
 focused, and delegates opening a session to Claude Code's own `claude-vscode.editor.open` with a
 terminal fallback. `closeSession` (0.6.12) rides on that same reveal: Claude Code's id→panel
-registry brings the named session's tab to the front, and the tab that became active is closed
-— by a UNIQUE label only, never by revealing the session (a reveal revives a dead one).
+registry brings the named session's tab to the front, and the tab that became active is closed,
+by a UNIQUE label only, never by revealing the session (a reveal revives a dead one).
 `closeSession` with `ById` (0.6.16, `closeClaudeTabById`) makes the opposite trade for a session
 that is still ALIVE, which is the only way to reach one of several tabs all called "Claude Code":
-it does reveal by id, and checks three things before closing anything — a Claude tab is in front,
+it does reveal by id, and checks three things before closing anything: a Claude tab is in front,
 the tab count did not grow (a count that grew means the reveal RESUMED the session into a new tab,
 which is closed again at once), and if the active tab did not move, its label must agree.
 `newSession` with `AfterSessionId` / `NoFocus` (0.6.14) reveals a live anchor session's tab first so
@@ -148,8 +156,8 @@ failure, an alert that vanishes quietly is not.
 
 **One folder, more than one window.** A card is a FOLDER, and the same folder can be open
 in two VSCode windows at once (a second instance running a separate Claude Code configuration
-is the usual reason). Nothing in a hook payload says which window a session belongs to — the payload
-carries `cwd` — so both windows' sessions land on the same card, by design. What must not
+is the usual reason). Nothing in a hook payload says which window a session belongs to (the payload
+carries `cwd`), so both windows' sessions land on the same card, by design. What must not
 collapse is the window-level state: each `VscodeConnection` keeps its OWN tab list and its
 own focus, the card's tab list is their union, and the active tab comes only from a window
 that currently has focus. Commands (`openSession`, `newSession`) go to the window that
@@ -178,17 +186,17 @@ entirely when a window sets a custom `window.title`. The PID cannot help either:
 creates every window inside the Electron main process, and the extension host is a utility
 child of that same main process, so all of one instance's windows and hosts report one pid
 (measured 22-08-2026: four windows, four hosts, pid 53380 for all eight). `OwnerPid` therefore
-identifies the VSCode INSTANCE, which is still worth having — a second window running another
-Claude Code configuration is a second instance — and nothing finer.
+identifies the VSCode INSTANCE, which is still worth having (a second window running another
+Claude Code configuration is a second instance), and nothing finer.
 
 The answer is focus correlation (`CorrelateConnectorWindow`): when the extension reports that
 its window has OS focus, `GetForegroundWindow()` says which window that is, and the pair is
 recorded on the connection as `Hwnd`. One API call per sync, no extension change, and it
-self-corrects — whatever a window was thought to be, the next time the user works in it, it
+self-corrects: whatever a window was thought to be, the next time the user works in it, it
 says so itself. A connector that has not been focused since it connected has no `Hwnd` yet,
 and `RebindToConnectorWindow` falls back to the title, weakest-last: the card's own pattern,
 then any window of that instance whose title merely NAMES the folder (what a custom title
-still does), then a lone window in the instance — skipping windows another card already owns.
+still does), then a lone window in the instance, skipping windows another card already owns.
 
 ## Where state lives
 
@@ -197,6 +205,7 @@ still does), then a lone window in the instance — skipping windows another car
 | `%APPDATA%\TabTower\config.json` | Everything persistent. Hand-editable; unknown keys are filled from defaults on load. |
 | `%APPDATA%\TabTower\logs` | The diagnostic log. `tabtower log --debug on` raises the level and persists it. |
 | `%APPDATA%\TabTower\toggles\<id>` | One file per user toggle, `1` or `0`, for external processes. |
+| config.json `PhoneAccess` | Phone page on/off, its loopback port, and the approved devices (Tailscale node IDs). |
 | `~\.claude\projects\<slug>\*.jsonl` | Claude Code's transcripts. Read-only to us, and the slug is derived in `DefaultTranscriptDir`. |
 | `<workspace>\.vscode\settings.json` | Read for the card colour only. Never written. |
 

@@ -1,4 +1,10 @@
-# Renders assets/social-preview.png - the 1280x640 card GitHub unfurls for the repo.
+# Renders the EARLIER design of the 1280x640 card GitHub unfurls for the repo.
+#
+# SUPERSEDED. The card in use is assets/social/social-preview.png, drawn from
+# assets/social/social-preview.html (that file's header says how to render it). This script
+# still writes assets/social-preview.png, which is no longer tracked: the copy that was
+# committed predated the product's rename and was removed. Kept only as the record of how the
+# earlier card was composed; do not point its output at the card in use, it would replace it.
 #
 # RUN BY HAND, never automatically: nothing in release.ps1 or CI calls this, and it
 # captures NOTHING. It only composes a card out of the staged demo screenshot already

@@ -1,3 +1,4 @@
+using System.Windows;
 using System.Windows.Media;
 using TabTower.Models;
 using TabTower.Services;
@@ -26,6 +27,12 @@ public sealed class TaskItemViewModel
     public string SessionPrompt { get; init; } = "";
     /// <summary>This card's own fast launch phrase, or "".</summary>
     public string SessionPromptFast { get; init; } = "";
+
+    /// <summary>The side this card's name is drawn on. NOT derived from this card's own name:
+    /// the panel sets one value on every task of a load (TasksPanelViewModel.Apply), so all the
+    /// names in a list share one side. RightToLeft is the fixed header of 06-08-2026 and the
+    /// default, so a card nothing has stamped is drawn exactly as it always was.</summary>
+    public FlowDirection NameFlow { get; set; } = FlowDirection.RightToLeft;
 
     public bool HasDescription => Description.Length > 0;
     public bool HasLead => Lead.Length > 0;
@@ -62,7 +69,7 @@ public sealed class TaskItemViewModel
     {
         get
         {
-            var lines = new List<string> { $"‏{Id} — {Name}" };
+            var lines = new List<string> { $"‏{Id}: {Name}" };
             if (HasStatus) lines.Add($"Status: {Status}");
             if (HasLead) lines.Add(Lead);
             if (HasDescription) lines.Add(Description);

@@ -20,7 +20,7 @@ public partial class EditCardDialog : Window
         _ws = ws;
         InitializeComponent();
 
-        Title = $"Edit workspace — {ws.Name}";
+        Title = $"Edit workspace: {ws.Name}";
         AutoTitleCheck.Content = "Automatic title (folder name)";
         AutoTitleCheck.IsChecked = string.IsNullOrEmpty(ws.CustomTitle);
         TitleBox.Text = ws.DisplayTitle;

@@ -616,7 +616,7 @@ public static class TranscriptReader
                             if (name == null || id == null || resolved.Contains(id)) continue;
                             toolNames[id] = name;
                             bool isAsk = AskTools.Contains(name);
-                            string detail = isAsk ? AskDetail(name, block) : $"Waiting for permission: {name}";
+                            string detail = isAsk ? AskDetail(name, block) : PermissionWait.Text(name);
                             pending[id] = new PendingCall(name, detail, stamp, isAsk);
                             order.Add(id);
                         }
@@ -799,16 +799,20 @@ public static class TranscriptReader
             if (!root.TryGetProperty("message", out var message) ||
                 !message.TryGetProperty("content", out var content)) return null;
 
+            // Every text part, joined: with the browser extension connected the injected block is
+            // its own first part and the user's words are the second, so reading the first part
+            // alone rejected every such prompt as markup (see InjectedPrefix).
             string? text = content.ValueKind switch
             {
                 JsonValueKind.String => content.GetString(),
-                JsonValueKind.Array => content.EnumerateArray()
+                JsonValueKind.Array => string.Join("\n", content.EnumerateArray()
                     .Where(e => e.TryGetProperty("type", out var t) && t.GetString() == "text")
                     .Select(e => e.TryGetProperty("text", out var txt) ? txt.GetString() : null)
-                    .FirstOrDefault(t => t != null),
+                    .Where(t => t != null)) is { Length: > 0 } joined ? joined : null,
                 _ => null,
             };
             if (text == null) return null;
+            text = InjectedPrefix.Strip(text);
             // A message another session delivered is written with isMeta=true — Claude Code
             // files it as harness-injected, which it is, but for THIS session it is the opening
             // prompt (a relay script hands a successor its instruction this way, 05-09-2026: a

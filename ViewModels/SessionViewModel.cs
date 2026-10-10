@@ -428,7 +428,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
             if (_lostAgents > 0) lines.Add(LostAgentsTip);
             // Headline only — the ⛁ chip's own tooltip carries the breakdown.
             if (_tokens is { Requests: > 0 } tk)
-                lines.Add($"tokens: {Compact(tk.Weighted)} effective ({Compact(tk.Raw)} raw)");
+                lines.Add($"tokens used so far: {Compact(tk.Weighted)} weighted by price ({Compact(tk.Raw)} raw)");
             // Where it runs, before the clocks: with three same-folder instances this is
             // the first thing to know about a card, and nothing else records it.
             if (HasGroup) lines.Add($"window: {GroupLabel}");
@@ -437,11 +437,11 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
             lines.Add($"started: {StartedAt:HH:mm d'/'M}");
             if (LastEventAt is { } le) lines.Add($"last event: {le:HH:mm d'/'M}");
             if (EndedAt is { } ea) lines.Add($"ended: {ea:HH:mm d'/'M}" + (_endReason != null ? $" ({_endReason})" : ""));
-            if (_endedTabOpen) lines.Add("its VSCode tab is still open — nothing is running behind it");
+            if (_endedTabOpen) lines.Add("its VS Code tab is still open; nothing is running behind it");
             if (!_closed && _status == SessionStatus.Replaced)
                 lines.Add(_openAsTab
-                    ? "closed itself after handing off to a new session — nothing runs behind its tab; close the tab and this card goes away"
-                    : "closed itself after handing off to a new session — this card goes away on the next sweep");
+                    ? "closed itself after handing off to a new session. Nothing runs behind its tab; close the tab and this card goes away"
+                    : "closed itself after handing off to a new session; this card goes away on the next sweep");
             return string.Join(Environment.NewLine, lines);
         }
     }
@@ -627,18 +627,18 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
     public string AgentsTip => _workflowAgents > 0
         ? _workflowAgents == AgentsRunning
             ? _workflowAgents == 1
-                ? "1 agent is running in a workflow team — the session resumes on its own when the team finishes"
-                : $"{_workflowAgents} agents are running in a workflow team — the session resumes on its own when the team finishes"
-            : $"{AgentsRunning} agents are still running ({_workflowAgents} in a workflow team, {_backgroundAgents + _foregroundAgents} subagents) — the session comes back on its own"
+                ? "1 agent is running in a workflow team; the session resumes on its own when the team finishes"
+                : $"{_workflowAgents} agents are running in a workflow team; the session resumes on its own when the team finishes"
+            : $"{AgentsRunning} agents are still running ({_workflowAgents} in a workflow team, {_backgroundAgents + _foregroundAgents} subagents); the session comes back on its own"
         : _backgroundAgents > 0 && _foregroundAgents > 0
-        ? $"{AgentsRunning} subagents are still running ({_foregroundAgents} holding the turn, {_backgroundAgents} in the background) — the session comes back on its own"
+        ? $"{AgentsRunning} subagents are still running ({_foregroundAgents} holding the turn, {_backgroundAgents} in the background); the session comes back on its own"
         : _foregroundAgents > 0
             ? _foregroundAgents == 1
-                ? "1 subagent is still running — the session is blocked on it and resumes by itself when it returns"
-                : $"{_foregroundAgents} subagents are still running — the session is blocked on them and resumes by itself when they return"
+                ? "1 subagent is still running; the session is blocked on it and resumes by itself when it returns"
+                : $"{_foregroundAgents} subagents are still running; the session is blocked on them and resumes by itself when they return"
             : _backgroundAgents == 1
-                ? "1 subagent is still running — the session resumes on its own when it reports back"
-                : $"{_backgroundAgents} subagents are still running — the session resumes on its own when they report back";
+                ? "1 subagent is still running; the session resumes on its own when it reports back"
+                : $"{_backgroundAgents} subagents are still running; the session resumes on its own when they report back";
 
     public bool HasDispatchedRuns => _dispatchedRuns > 0;
 
@@ -648,8 +648,8 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
 
     public string DispatchedRunsTip =>
         _dispatchedRuns == 1
-            ? "1 headless run it launched is still going — it reports back on its own, not into the session, so this card is not blinking for you"
-            : $"{_dispatchedRuns} headless runs it launched are still going — they report back on their own, not into the session, so this card is not blinking for you";
+            ? "1 headless run it launched is still going; it reports back on its own, not into the session, so this card is not blinking for you"
+            : $"{_dispatchedRuns} headless runs it launched are still going; they report back on their own, not into the session, so this card is not blinking for you";
 
     private IReadOnlyList<string> _liveTaskIds = Array.Empty<string>();
     /// <summary>The ids of the background SHELL tasks still running when the last turn ended,
@@ -844,8 +844,8 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
         "other. Decide which one to keep and close the other; nothing here does it for you.";
 
     public string JobsTip => ActiveJobs == 1
-        ? "1 background job it started is still running — it wakes the session when it finishes, so this card is not asking for you"
-        : $"{ActiveJobs} background jobs it started are still running — they wake the session when they finish, so this card is not asking for you";
+        ? "1 background job it started is still running; it wakes the session when it finishes, so this card is not asking for you"
+        : $"{ActiveJobs} background jobs it started are still running; they wake the session when they finish, so this card is not asking for you";
 
     /// <summary>The watch chip. 📡 rather than a third 🤖 or a second 🌊 because it answers a
     /// different question again: nothing of this session's is computing, it is listening, and
@@ -853,8 +853,8 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
     public string WatchesText => ActiveWatches > 1 ? $"📡{ActiveWatches}" : "📡";
 
     public string WatchesTip => ActiveWatches == 1
-        ? "1 monitor it armed is still watching — an event wakes the session by itself, so this card is not asking for you"
-        : $"{ActiveWatches} monitors it armed are still watching — an event wakes the session by itself, so this card is not asking for you";
+        ? "1 monitor it armed is still watching; an event wakes the session by itself, so this card is not asking for you"
+        : $"{ActiveWatches} monitors it armed are still watching; an event wakes the session by itself, so this card is not asking for you";
 
     private void RaiseWatchChip()
     {
@@ -925,7 +925,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
                 : $"{_lostAgents} background agents were still running when this session's process exited";
             string names = _lostAgentsDetail.Length > 0 ? Environment.NewLine + _lostAgentsDetail : "";
             return head + names + Environment.NewLine +
-                   "Their transcripts are on disk — nothing was lost, but nothing finished either.";
+                   "Their transcripts are on disk: nothing was lost, but nothing finished either.";
         }
     }
 
@@ -961,16 +961,16 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
             if (_tokens is not { Requests: > 0 } t) return "";
             var lines = new List<string>
             {
-                $"{Compact(t.Weighted)} tokens over {t.Requests} turn{(t.Requests == 1 ? "" : "s")}, " +
-                $"charged as input-equivalent — {Compact(t.Raw)} raw, but a cache read bills at a tenth",
+                $"Used so far: {Compact(t.Weighted)} tokens over {t.Requests} turn{(t.Requests == 1 ? "" : "s")} " +
+                $"(weighted by price: {Compact(t.Raw)} raw, and a cache read counts as a tenth)",
                 $"    cache reads {Compact(t.CacheRead)} → {Compact(t.CacheReadWeighted)}  ·  " +
                 $"cache writes {Compact(t.CacheWrite)} → {Compact(t.CacheWriteWeighted)}  ·  " +
                 $"output {Compact(t.Output)} → {Compact(t.OutputWeighted)}  ·  " +
                 $"fresh input {Compact(t.Input)}",
             };
             if (t.ContextWindow > 0)
-                lines.Add($"    context now: {Compact(t.ContextNow)} of {Compact(t.ContextWindow)} " +
-                          $"({t.ContextNow * 100 / t.ContextWindow}%)");
+                lines.Add($"Context window now: {Compact(t.ContextNow)} of {Compact(t.ContextWindow)} " +
+                          $"({t.ContextNow * 100 / t.ContextWindow}% full)");
             return string.Join(Environment.NewLine, lines);
         }
     }

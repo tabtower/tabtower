@@ -8,10 +8,18 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>TabTower</AssemblyName>
     <RootNamespace>TabTower</RootNamespace>
-    <Version>0.11.9</Version>
+    <Version>0.11.19</Version>
     <ApplicationIcon>assets\TabTower.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <StartupObject>TabTower.Program</StartupObject>
+  </PropertyGroup>
+
+  <!-- A Release build makes no debug symbols. TabTower.pdb records the folder the build ran in
+       and the address of the repository it was built from, and while symbols are on the
+       compiler also writes the .pdb's full path into TabTower.dll. Neither belongs in a
+       download. Debug builds keep their symbols. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,5 +29,23 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- The phone page (Services/Phone): the page and one string table per language, embedded
+         under stable names so the server finds them whatever the assembly's namespace is. -->
+    <EmbeddedResource Include="Services\Phone\Web\*.*" LogicalName="phone/%(Filename)%(Extension)" WithCulture="false" />
+    <!-- Test projects live under tests/ with their own csproj; never compile them into the app. -->
+    <Compile Remove="tests\**" />
+    <None Remove="tests\**" />
+    <EmbeddedResource Remove="tests\**" />
+  </ItemGroup>
+
+  <!-- install.ps1 reports the hooks version from the hook script's "# Version:" header. Only
+       release.ps1 used to sync it, so a build installed by hand showed an older one. The build
+       now stops when the header and <Version> differ. -->
+  <Target Name="CheckHookScriptVersion" BeforeTargets="BeforeBuild">
+    <Error Condition="!$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\hooks\tabtower-hook.ps1').Contains('# Version: $(Version) '))"
+           Text="hooks\tabtower-hook.ps1: its '# Version:' header is not $(Version). Set it to the csproj version (keep the file's UTF-8 BOM)." />
+  </Target>
 
 </Project>
