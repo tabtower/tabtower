@@ -248,12 +248,24 @@
           <p>Every session row shows the tokens it has used so far. Hover the count for the breakdown and how full the context window is now.</p>
         </div>
         <div class="card">
+          <h3>See when the cache goes cold</h3>
+          <p>While a session waits for you, its row counts down how long its prompt cache stays warm. On a large context the last five minutes pulse the row yellow, and once the cache has expired the row turns light blue, so you know the next reply rewrites the whole context.</p>
+        </div>
+        <div class="card">
+          <h3>Pin a session</h3>
+          <p>Pin the session you keep coming back to and it stays at the top of its window's block, whatever the others are doing. Right-click to pin or unpin, or let the session pin itself from the CLI.</p>
+        </div>
+        <div class="card">
+          <h3>One board for every question</h3>
+          <p>One session per window can collect the questions the others are waiting on and carry your answers back. Its row says how many questions wait for you, and stays quiet when there are none.</p>
+        </div>
+        <div class="card">
           <h3>A tasks page, if you want one</h3>
           <p>Point TabTower at a JSON file your own tooling writes and it lists your tasks next to your live sessions. Click a task to open a session in its workspace: a new one, or the one already linked to it.</p>
         </div>
         <div class="card">
           <h3>Scriptable, and out of the way</h3>
-          <p>A full CLI over a named pipe, an optional reserved strip of the monitor that maximized windows never cover, and it starts with Windows with your layout restored.</p>
+          <p>A full CLI over a named pipe: a session or a script can open a fresh session next to an old one, in the window you choose, without stealing your focus, and the deck shows the old one as replaced. Plus an optional reserved strip of the monitor that maximized windows never cover, and it starts with Windows with your layout restored.</p>
         </div>
         <div class="card wide">
           <h3>One card per workspace</h3>
@@ -293,7 +305,8 @@
           <li>see every open session and its status,</li>
           <li>open a new session, or close one together with its tab,</li>
           <li>reopen a session you just closed,</li>
-          <li>jump into the Claude app on a session that has a link there.</li>
+          <li>jump into the Claude app on a session that has a link there,</li>
+          <li>with a tasks file, start a task's session in the window you pick.</li>
         </ul>
         <p>Each new device is paired by typing the code it shows into a prompt on your PC. <a href="https://github.com/tabtower/tabtower/blob/main/docs/phone-access.md">Setup and security model</a>.</p>
       </div>
