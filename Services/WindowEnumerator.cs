@@ -36,6 +36,20 @@ public static class WindowEnumerator
         return true;
     }
 
+    /// <summary>The Claude desktop app's main window, or Zero when the app is not running. Its
+    /// process is `claude.exe`, the same name as the Claude Code CLI, but the CLI owns no
+    /// top-level window of its own (a terminal's window belongs to the terminal), so a visible,
+    /// titled window under that name is the app. A pop-out session window is one too, so the
+    /// one titled exactly "Claude" wins when there are several.</summary>
+    public static IntPtr FindClaudeAppWindow()
+    {
+        var windows = GetCandidates()
+            .Where(w => string.Equals(w.ProcessName, "claude", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return (windows.FirstOrDefault(w => w.Title == "Claude") ?? windows.FirstOrDefault())?.Hwnd
+               ?? IntPtr.Zero;
+    }
+
     public static int GetProcessId(IntPtr hwnd)
     {
         NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);

@@ -938,6 +938,10 @@ public partial class MainWindow : Window
     private static bool HostedInVscode(SessionViewModel s)
         => s.Entrypoint is "claude-vscode" && !s.PrintMode;
 
+    /// <summary>CLAUDE_CODE_ENTRYPOINT of a session running in the Claude desktop app's Code
+    /// tab (measured 28-10-2026, app 4.29.0).</summary>
+    private const string DesktopEntrypoint = "claude-desktop";
+
     /// <summary>Has anything to match a VSCode tab label against — a session with no
     /// titles at all can never correlate, so "no tab matched" proves nothing for it.</summary>
     private static bool Correlatable(SessionViewModel s)
@@ -2980,6 +2984,22 @@ public partial class MainWindow : Window
             session.Acknowledged = true;
             RefreshBlinkAndSummary();
             QueueSave();
+        }
+        // A session running in the Claude desktop app has no VSCode tab, and no connector can
+        // reach it: raise the app's window and stop. Picking the session inside the app is left
+        // to the user - none of the claude:// routes tried on 28-10-2026 (code/<id>,
+        // code/continue, code/needs-input, with the app's own local_ id in the path or as
+        // ?sessionId=) opened a given session.
+        if (session.Entrypoint is DesktopEntrypoint)
+        {
+            var app = WindowEnumerator.FindClaudeAppWindow();
+            LogService.Info("open", $"click session={session.SessionId} ws=\"{ws.DisplayTitle}\" desktop app " +
+                                    (app != IntPtr.Zero ? "raised" : "not running"));
+            if (app != IntPtr.Zero) WindowActions.Focus(app);
+            SetStatus(app != IntPtr.Zero
+                ? $"\"{session.DisplayTitle}\" runs in the Claude app: pick it in the app's sidebar"
+                : $"\"{session.DisplayTitle}\" runs in the Claude app, which is not running");
+            return;
         }
         // Decide the target window BEFORE focusing: with the folder open twice, the card's
         // bind (a title match, which can't tell two windows on one folder apart) is not

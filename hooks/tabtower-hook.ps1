@@ -1,5 +1,5 @@
 ﻿# TabTower hook bridge for Claude Code.
-# Version: 0.11.44  (parsed by install.ps1 — must equal TabTower.csproj <Version>; the build fails otherwise)
+# Version: 0.11.45  (parsed by install.ps1 — must equal TabTower.csproj <Version>; the build fails otherwise)
 # Called by Claude Code hooks with the event name as argument; the hook payload
 # (session_id, cwd, transcript_path, permission_mode + event-specific fields)
 # arrives as JSON on stdin. Everything the payload provides is forwarded to
