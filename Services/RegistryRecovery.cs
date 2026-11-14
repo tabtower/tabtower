@@ -41,7 +41,8 @@ public enum RecoveryAction
 /// close aimed at a dead session once closed a live one. A record therefore earns a card only when
 /// its identity is proven: a parseable session id, a running pid whose start time matches the one
 /// recorded (a recycled pid belongs to a stranger), an interactive session of the VS Code extension
-/// running the extension's own binary, and, for a new card, a transcript on disk.</summary>
+/// running the extension's own binary, or one of a terminal or Claude Desktop (0.11.68), and, for a
+/// new card, a transcript on disk.</summary>
 public static class RegistryRecovery
 {
     /// <summary>Closes the deck made on its own evidence (the orphan, stale and exit sweeps), which a
@@ -65,9 +66,14 @@ public static class RegistryRecovery
             return (RecoveryAction.Skip, "its process is not running (exited, or the pid now belongs to another process)");
         if (!string.Equals(r.Kind, "interactive", StringComparison.Ordinal))
             return (RecoveryAction.Skip, $"not an interactive session (kind={r.Kind ?? "?"})");
-        if (!string.Equals(r.Entrypoint, IdeEntrypoint, StringComparison.Ordinal))
-            return (RecoveryAction.Skip, $"not a VS Code session (entrypoint={r.Entrypoint ?? "?"})");
-        if (!r.IdeBinary)
+        // A terminal or Claude Desktop session is a person's own session too (SessionHost, 0.11.68);
+        // the hooks give it a card while the deck runs, so a deck restart must not lose it. The
+        // binary test is the IDE's own proof and has no counterpart there: a `--bg` run is refused
+        // by its kind above, an sdk-* run by its entrypoint here.
+        bool outsideIde = SessionHost.IsOutsideIde(r.Entrypoint);
+        if (!outsideIde && !string.Equals(r.Entrypoint, IdeEntrypoint, StringComparison.Ordinal))
+            return (RecoveryAction.Skip, $"not a VS Code, terminal or Claude Desktop session (entrypoint={r.Entrypoint ?? "?"})");
+        if (!outsideIde && !r.IdeBinary)
             return (RecoveryAction.Skip, "its process is not the VS Code extension's binary (a headless run started from inside one)");
 
         if (known is { } k)

@@ -30,12 +30,18 @@ public sealed record PhoneSession(string Id, string Title, string Status, bool A
 /// <summary>Where a new session can be opened from a card. <c>Group</c> is "" for a card with
 /// no session groups. <c>State</c>: "ready" (its window is connected) or "launch" (the deck
 /// can start or is waiting for that window, and the session opens once it connects).</summary>
-public sealed record PhoneTarget(string Group, string Label, string State);
+public sealed record PhoneTarget(string Group, string Label, string State)
+{
+    /// <summary>0.11.66: the window's colour (#RRGGBB or "").</summary>
+    public string Color { get; init; } = "";
+}
 
 /// <summary>One deck card, as the deck groups them: a workspace, or one group card of a
 /// workspace split by session group.</summary>
 public sealed record PhoneCard(string Key, string Title, string Path, string Color,
-                               IReadOnlyList<PhoneSession> Sessions, IReadOnlyList<PhoneTarget> Targets);
+                               IReadOnlyList<PhoneSession> Sessions, IReadOnlyList<PhoneTarget> Targets)
+{
+}
 
 public sealed record PhoneClosedSession(string Id, string Title, string Group, string Workspace, long At);
 
@@ -44,7 +50,11 @@ public sealed record PhoneClosedSession(string Id, string Title, string Group, s
 /// <c>Prompt</c> (task sessions only): the opening phrase the session was given. VS Code puts it
 /// in the input box without sending it, so the page shows it for the user to send from the app.</summary>
 public sealed record PhoneNewResult(bool Ok, string? Error = null, string? Detail = null,
-                                    bool Launching = false, string? SessionId = null, string? Prompt = null);
+                                    bool Launching = false, string? SessionId = null, string? Prompt = null)
+{
+    /// <summary>0.11.66: for group "auto", the label of the window the pick chose.</summary>
+    public string? Picked { get; init; }
+}
 
 /// <summary>Outcome of a close or reopen. <c>Removed</c> (close only): the session had no message
 /// yet, so the deck dropped it instead of keeping it, and it will not be in "Recently closed".</summary>
@@ -56,7 +66,22 @@ public sealed record PhoneOpResult(bool Ok, string? Error = null, string? Detail
 /// address, opened on the phone itself rather than on the PC.</summary>
 public sealed record PhoneTask(string Id, string Name, string Lead, string Description, string Status,
                                string Color, bool Pinned, bool CanStart, bool HasFast, bool Nav,
-                               string NavLabel, string? Link);
+                               string NavLabel, string? Link,
+                               IReadOnlyList<PhoneChip>? Chips = null, PhoneHover? Hover = null);
+
+/// <summary>A task card's chip (0.11.52): its label and colours, and what tapping it shows, the
+/// panel the PC shows when the pointer rests on it. Colours are #RRGGBB, or "" for the default.</summary>
+public sealed record PhoneChip(string Label, string Background, string Foreground, PhoneHover? Hover);
+
+/// <summary>The detail panel behind a card or a chip, as the PC draws it on hover: a title,
+/// groups of rows, a footer. <c>Rtl</c> is one direction for the whole panel, as on the PC.</summary>
+public sealed record PhoneHover(string Title, IReadOnlyList<PhoneHoverSection> Sections, string Footer, bool Rtl);
+
+public sealed record PhoneHoverSection(string Heading, string Color, IReadOnlyList<PhoneHoverRow> Rows, string More);
+
+public sealed record PhoneHoverRow(string Text, string Number, IReadOnlyList<PhoneHoverDetail> Details);
+
+public sealed record PhoneHoverDetail(string Label, string Value);
 
 /// <summary>One square of the tasks page's top-level navigation column (or its home square).</summary>
 public sealed record PhoneNav(string Number, string Label, string Name, string Status, string Color,
@@ -67,7 +92,11 @@ public sealed record PhoneNav(string Number, string Label, string Name, string S
 /// page sends back, so the phone reaches exactly the window the same click would. <c>State</c>:
 /// "ready" (its window is connected), "launch" (the deck will start it, or is waiting for it)
 /// or "off" (not running and the deck has no way to start it).</summary>
-public sealed record PhoneLaunchOption(string Key, string Label, string Color, string State = "ready");
+public sealed record PhoneLaunchOption(string Key, string Label, string Color, string State = "ready")
+{
+    /// <summary>0.11.66: the group this option opens in.</summary>
+    public string Group { get; init; } = "";
+}
 
 /// <summary>The tasks page. <c>Enabled</c> false = no tasks file is configured on the PC, and
 /// the page shows no tasks tab. <c>LoadedAt</c> moves on every reload of the file, which is how
@@ -75,7 +104,9 @@ public sealed record PhoneLaunchOption(string Key, string Label, string Color, s
 public sealed record PhoneTasksView(bool Enabled, string? Error, string Generated, long LoadedAt,
                                     IReadOnlyList<PhoneTask> Tasks, IReadOnlyList<PhoneNav> Nav,
                                     PhoneNav? Home, IReadOnlyList<PhoneLaunchOption> Options,
-                                    int LaunchCount);
+                                    int LaunchCount)
+{
+}
 
 /// <summary>Rules the deck side and the test fake share, so they cannot drift apart.</summary>
 public static class PhoneRules

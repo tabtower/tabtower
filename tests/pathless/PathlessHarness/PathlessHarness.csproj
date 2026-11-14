@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Test harness for retiring a folderless duplicate card (0.11.44). It compiles the app's own
+       PathlessDuplicate source (linked, not copied), so the rule under test is exactly the code
+       that ships, without starting the app. See tests/pathless-duplicates.tests.ps1. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>PathlessHarness</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\..\Services\PathlessDuplicate.cs" Link="PathlessDuplicate.cs" />
+  </ItemGroup>
+
+</Project>

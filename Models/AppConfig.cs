@@ -201,6 +201,10 @@ public class SessionConfig
     /// IDE, sdk-cli for a headless `claude --print` run. Persisted so a restart doesn't
     /// un-hide every automated session until its next hook event.</summary>
     public string? Entrypoint { get; set; }
+    /// <summary>The transcript's sessionKind ("bg" for a `claude --bg` run). Persisted for the
+    /// same reason as Entrypoint: after a restart the first tab claim must not see a background
+    /// run as an ordinary session before the transcript scan has read it again.</summary>
+    public string? SessionKind { get; set; }
     /// <summary>The session is a `claude -p` run (hook-proven from its command line, not from
     /// the inherited environment). Persisted for the same reason as Entrypoint: a restart must
     /// not un-hide a batch of automated runs that is still going.</summary>
@@ -376,6 +380,7 @@ public class PhoneAccessConfig
     public bool Enabled { get; set; }
     public int Port { get; set; } = DefaultPort;
     public List<Services.Phone.PairedDevice> Devices { get; set; } = new();
+
 }
 
 public class AppConfig

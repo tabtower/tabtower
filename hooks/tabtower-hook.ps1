@@ -1,5 +1,5 @@
 ﻿# TabTower hook bridge for Claude Code.
-# Version: 0.11.44  (parsed by install.ps1 — must equal TabTower.csproj <Version>; the build fails otherwise)
+# Version: 0.11.72  (parsed by install.ps1 — must equal TabTower.csproj <Version>; the build fails otherwise)
 # Called by Claude Code hooks with the event name as argument; the hook payload
 # (session_id, cwd, transcript_path, permission_mode + event-specific fields)
 # arrives as JSON on stdin. Everything the payload provides is forwarded to
@@ -144,6 +144,7 @@ switch ($HookEvent) {
         $cliArgs = @('session', 'status', '--id', $sid, '--state', 'waiting')
         $message = Get-Trimmed $payload.message
         if ($message)                 { $cliArgs += @('--detail', $message) }
+        if ($payload.agent_id)        { $cliArgs += '--subagent' }
     }
     # The official permission hook — fires the moment the approval dialog opens, in the
     # VSCode UI too (verified 2026-08-04, Claude Code 2.1.220), where Notification does
@@ -153,6 +154,10 @@ switch ($HookEvent) {
         $cliArgs = @('session', 'status', '--id', $sid, '--state', 'waiting')
         $detail = Get-PermissionWaitText $payload
         $cliArgs += @('--detail', $detail, '--permission-dialog')
+        # Claude Code puts agent_id in the payload only when the hook fires inside a subagent.
+        # The deck decides what that means (MainWindow.SetSessionStatus): a
+        # background agent has no dialog anyone can answer, so it must not paint the card.
+        if ($payload.agent_id)        { $cliArgs += '--subagent' }
     }
     # A turn can end while the session is not free at all: subagents launched with
     # run_in_background keep running, report back on their own and resume it. The Stop

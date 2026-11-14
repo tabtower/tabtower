@@ -98,4 +98,61 @@ public class TaskEntry
     /// sub-tasks — and calling all of them "Open task" made a navigation card read as a unit
     /// of work. The producer knows, so it may say. Missing = the generic label.</summary>
     public string? UrlLabel { get; set; }
+    /// <summary>"pill" draws the status as a filled badge in the status colour instead of
+    /// coloured text. For a card whose status is THE answer to "should I open this" - a small
+    /// coloured word beside the id is read last, a filled badge is read first. Missing = text.</summary>
+    public string? StatusStyle { get; set; }
+    /// <summary>Optional row of small labelled counts under the lead line ("3 waiting for X").
+    /// The producer writes the label, the colours and what hovering one shows; the deck only
+    /// lays them out. Missing or empty = no row.</summary>
+    public List<TaskChip> Chips { get; set; } = new();
+    /// <summary>Optional structured panel shown when the pointer rests on the card. A card
+    /// otherwise carries no tooltip (everything is printed on it); a producer that prints a
+    /// summary on the card can put the detail behind it here.</summary>
+    public TaskHover? Hover { get; set; }
+}
+
+/// <summary>One chip of a task card. Colours are names or #RRGGBB; missing = neutral grey.</summary>
+public class TaskChip
+{
+    public string? Label { get; set; }               // required
+    public string? Background { get; set; }
+    public string? Foreground { get; set; }
+    /// <summary>What hovering this chip shows: usually only the items the chip counts, in more
+    /// detail than the card's own hover.</summary>
+    public TaskHover? Hover { get; set; }
+}
+
+/// <summary>A hover panel: an optional title, groups of rows, and an optional footer line.</summary>
+public class TaskHover
+{
+    public string? Title { get; set; }
+    public List<TaskHoverSection> Sections { get; set; } = new();
+    public string? Footer { get; set; }
+}
+
+public class TaskHoverSection
+{
+    public string? Heading { get; set; }
+    public string? Color { get; set; }               // the heading's colour
+    public List<TaskHoverRow> Rows { get; set; } = new();
+    /// <summary>A closing line such as "and 4 more", written by the producer, which is the one
+    /// that knows how many rows it left out.</summary>
+    public string? More { get; set; }
+}
+
+public class TaskHoverRow
+{
+    public string? Text { get; set; }                // required
+    /// <summary>A reference drawn small and dim after the text (a task number).</summary>
+    public string? Number { get; set; }
+    /// <summary>Label/value lines under the text. Present = the row is drawn as a detailed
+    /// entry with its text in a heavier weight.</summary>
+    public List<TaskHoverDetail> Details { get; set; } = new();
+}
+
+public class TaskHoverDetail
+{
+    public string? Label { get; set; }
+    public string? Value { get; set; }
 }

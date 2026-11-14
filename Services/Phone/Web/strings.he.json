@@ -119,6 +119,9 @@
   "task_link": "קישור ›",
   "task_more": "עוד",
   "task_less": "פחות",
+  "chip_detail_title": "הצג מה התג הזה סופר",
+  "task_detail_title": "הקש כדי להציג את פרטי המשימה",
+  "detail_close_title": "סגור את הפרטים",
   "task_launch_text": "סשן Claude Code חדש ייפתח במחשב על {task}.",
   "task_launch_pick": "באיזה חלון:",
   "task_launch_default": "פתח סשן",
@@ -137,5 +140,9 @@
   "toast_task_new": "נפתח סשן חדש. ההוראה שלו ממתינה בחלון במחשב ועוד לא נשלחה:",
   "task_copy_open": "העתק אותה ופתח באפליקציה ›",
   "task_copy": "העתק אותה",
-  "task_copied": "הועתקה"
+  "task_copied": "הועתקה",
+  "win_pick_title": "באיזה חלון לפתוח?",
+  "win_pick_text": "סשן Claude Code חדש ייפתח ב-\"{card}\" במחשב.",
+  "win_this": "החלון של הכרטיס",
+  "toast_picked": "נבחר החלון {group}."
 }

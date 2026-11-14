@@ -1,15 +1,170 @@
 <UserControl x:Class="TabTower.TaskItemView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:TabTower.ViewModels">
     <!-- One task card: name + optional status/description, action buttons.
          DataContext = TaskItemViewModel. Used by the tasks page and by the workspace
          card's inline task list. -->
-    <!-- The whole card is a click target (not only the buttons), and it carries no tooltip:
-         everything a tooltip would show is already printed on the card. The narrow squares
-         in TasksStripView DO keep theirs - there the tooltip is the only way to read a task. -->
-    <Border BorderBrush="{Binding StatusBrush}" BorderThickness="2" CornerRadius="5"
+    <!-- The whole card is a click target (not only the buttons), and by default it carries no
+         tooltip: everything a tooltip would show is already printed on the card. The one
+         exception is a card whose producer wrote a hover panel (the tasks file's `hover`): that
+         card prints a summary and keeps the detail behind it. The narrow squares in
+         TasksStripView DO keep theirs - there the tooltip is the only way to read a task. -->
+    <UserControl.Resources>
+        <!-- A hover panel (tasks file `hover`), drawn the same way for the card and for a chip.
+             Fixed sizes: a tooltip lives in its own popup, outside the window whose FontScale the
+             card binds to. -->
+        <DataTemplate DataType="{x:Type vm:TaskHoverViewModel}">
+            <StackPanel FlowDirection="{Binding Flow}" MaxWidth="480">
+                <TextBlock Text="{Binding Title}" Foreground="#FF9DA5AE" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,6">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasTitle}" Value="False">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <ItemsControl ItemsSource="{Binding Sections}" Focusable="False">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="0,0,0,7">
+                                <TextBlock Text="{Binding Heading}" Foreground="{Binding HeadingBrush}" FontWeight="SemiBold"
+                                           FontSize="12.5" TextWrapping="Wrap" Margin="0,0,0,1">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasHeading}" Value="False">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <ItemsControl ItemsSource="{Binding Rows}" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Margin="0,1,0,1">
+                                                <!-- the row: plain words first, the number small and dim after them -->
+                                                <TextBlock TextWrapping="Wrap" Foreground="White" FontSize="12.5">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding HasDetails}" Value="True">
+                                                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                                                    <Setter Property="Margin" Value="0,4,0,0"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                    <Run Text="{Binding Text, Mode=OneWay}"/><Run Text="  " FontSize="10"/><Run Text="{Binding Number, Mode=OneWay}" FontSize="10.5" FontWeight="Normal" Foreground="#FF9DA5AE"/>
+                                                </TextBlock>
+                                                <ItemsControl ItemsSource="{Binding Details}" Focusable="False">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock TextWrapping="Wrap" Foreground="#FFCCCCCC" FontSize="12">
+                                                                <Run Text="{Binding Label, Mode=OneWay}" Foreground="#FF9DA5AE"/><Run Text=" "/><Run Text="{Binding Value, Mode=OneWay}"/>
+                                                            </TextBlock>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="{Binding More}" Foreground="#FF9DA5AE" FontSize="12">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasMore}" Value="False">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Border BorderBrush="#FF444444" BorderThickness="0,1,0,0" Padding="0,5,0,0" Margin="0,1,0,0">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasFooter}" Value="False">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <TextBlock Text="{Binding Footer}" Foreground="#FF9DA5AE" FontSize="11.5" TextWrapping="Wrap"/>
+                </Border>
+            </StackPanel>
+        </DataTemplate>
+        <!-- One instance per use (x:Shared False): a ToolTip is a single visual and cannot be
+             parented by two cards at once. Dark, like the deck, and set apart from the card by
+             a border and a shadow-like edge. -->
+        <ToolTip x:Key="HoverTip" x:Shared="False" Content="{Binding Hover}"
+                 Background="#FF2D2D30" BorderBrush="#FF555555" BorderThickness="1" Padding="12,9"
+                 FlowDirection="{Binding Hover.Flow}" Placement="Mouse"/>
+
+        <!-- The name with its pin. One template, drawn in one of two places: beside the id and
+             status on a card wide enough, on its own line under them on a narrow one (the
+             header below says when). -->
+        <DataTemplate x:Key="TaskName">
+            <!-- RightToLeft mirrors layout as well as glyphs, so Dock=Left puts the pin on
+                 the right of the name, which is the side the text now starts from. -->
+            <DockPanel FlowDirection="RightToLeft">
+                <TextBlock DockPanel.Dock="Left" Text="📌" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=10}" Margin="0,1,4,0"
+                           VerticalAlignment="Top">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Pinned}" Value="False">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <!-- A card that navigates (it has a url: a parent that drills into its
+                     own level, or the producer's back/toggle cards) is painted as a
+                     hyperlink — blue and underlined. The emoji marker a producer may put
+                     in the name was not enough to spot while scanning (feedback
+                     07-08-2026); colour reads before the eye reaches the glyph. -->
+                <!-- The panel stays RightToLeft, so the pin keeps its place at the card's edge
+                     in both kinds of list; only the name's own text takes the list's side. -->
+                <TextBlock Text="{Binding Name}" Foreground="White" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=12}"
+                           FontWeight="SemiBold" TextWrapping="Wrap" FlowDirection="{Binding NameFlow}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasUrl}" Value="True">
+                                    <Setter Property="Foreground" Value="#FF6FB7FF"/>
+                                    <Setter Property="TextDecorations" Value="Underline"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </DockPanel>
+        </DataTemplate>
+    </UserControl.Resources>
+    <Border x:Name="Card" BorderBrush="{Binding StatusBrush}" BorderThickness="2" CornerRadius="5"
             Margin="0,3" Padding="8,5" Background="#FF262626"
-            Cursor="Hand" MouseLeftButtonUp="Card_MouseUp">
+            Cursor="Hand" MouseLeftButtonUp="Card_MouseUp"
+            ToolTipService.InitialShowDelay="350" ToolTipService.ShowDuration="60000">
+        <Border.Style>
+            <Style TargetType="Border">
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding HasHover}" Value="True">
+                        <Setter Property="ToolTip" Value="{StaticResource HoverTip}"/>
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
         <StackPanel>
             <!-- Fixed reading order, independent of the task's language: id hard left, then
                  status, then the name filling the rest and right-aligned. Deriving the header
@@ -21,7 +176,12 @@
                  when no loaded title has a right-to-left letter at all. Then the names are
                  left-aligned, and the id-and-status column takes one shared width across the
                  list (the hosting panel is the size scope), so every name starts on the same
-                 vertical line. In every other list nothing here differs from the fixed header. -->
+                 vertical line. In every other list nothing here differs from the fixed header.
+
+                 On a card narrower than 400 the name moves to a line of its own under the id
+                 and status. Beside them it was left a column a few letters wide and wrapped
+                 inside its words ("claud / e- / traini / ng" in the split-view panel). Every
+                 card of a list has the same width, so a list changes shape as a whole. -->
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto">
@@ -50,48 +210,59 @@
                                     <DataTrigger Binding="{Binding HasStatus}" Value="False">
                                         <Setter Property="Visibility" Value="Collapsed"/>
                                     </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </StackPanel>
-                <!-- RightToLeft mirrors layout as well as glyphs, so Dock=Left puts the pin on
-                     the right of the name, which is the side the text now starts from. -->
-                <DockPanel Grid.Column="1" FlowDirection="RightToLeft">
-                    <TextBlock DockPanel.Dock="Left" Text="📌" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=10}" Margin="0,1,4,0"
-                               VerticalAlignment="Top">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Pinned}" Value="False">
+                                    <DataTrigger Binding="{Binding StatusPill}" Value="True">
                                         <Setter Property="Visibility" Value="Collapsed"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
-                    <!-- A card that navigates (it has a url: a parent that drills into its
-                         own level, or the producer's back/toggle cards) is painted as a
-                         hyperlink — blue and underlined. The emoji marker a producer may put
-                         in the name was not enough to spot while scanning (feedback
-                         07-08-2026); colour reads before the eye reaches the glyph. -->
-                    <!-- The panel stays RightToLeft, so the pin keeps its place at the card's edge
-                         in both kinds of list; only the name's own text takes the list's side. -->
-                    <TextBlock Text="{Binding Name}" Foreground="White" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=12}"
-                               FontWeight="SemiBold" TextWrapping="Wrap" FlowDirection="{Binding NameFlow}">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
+                    <!-- statusStyle "pill": the same status as a filled badge, read before the name -->
+                    <Border Background="{Binding StatusBrush}" CornerRadius="4" Padding="7,1,7,2"
+                            Margin="8,0,0,0" VerticalAlignment="Center">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed"/>
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding HasUrl}" Value="True">
-                                        <Setter Property="Foreground" Value="#FF6FB7FF"/>
-                                        <Setter Property="TextDecorations" Value="Underline"/>
+                                    <DataTrigger Binding="{Binding StatusPill}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </DockPanel>
+                        </Border.Style>
+                        <TextBlock Text="{Binding Status}" Foreground="{Binding StatusPillForeground}" FontWeight="SemiBold"
+                                   FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}"
+                                   FlowDirection="{Binding Status, Converter={StaticResource Rtl}}"/>
+                    </Border>
+                </StackPanel>
+                <!-- the name beside the id and status: wide cards -->
+                <ContentControl Grid.Column="1" Content="{Binding}" ContentTemplate="{StaticResource TaskName}"
+                                Focusable="False">
+                    <ContentControl.Style>
+                        <Style TargetType="ContentControl">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ActualWidth, ElementName=Card, Converter={StaticResource NarrowerThan}, ConverterParameter=400}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ContentControl.Style>
+                </ContentControl>
             </Grid>
+            <!-- the name on its own line, the card's full width: narrow cards -->
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource TaskName}"
+                            Focusable="False" Margin="0,2,0,0">
+                <ContentControl.Style>
+                    <Style TargetType="ContentControl">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding ActualWidth, ElementName=Card, Converter={StaticResource NarrowerThan}, ConverterParameter=400}" Value="True">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ContentControl.Style>
+            </ContentControl>
             <!-- The lead line: what this card IS, as opposed to what is happening on it this
                  week. It is set apart three ways rather than one, because a wall of cards is
                  scanned rather than read — brighter than the body, a shade warmer than pure
@@ -115,6 +286,44 @@
                            TextWrapping="Wrap" LineHeight="15"
                            FlowDirection="{Binding Lead, Converter={StaticResource Rtl}}"/>
             </Border>
+            <!-- The chip row (tasks file `chips`): short counts the producer wrote, each with its
+                 own hover. A chip's tooltip wins over the card's while the pointer is on it,
+                 which is what lets the card show everything and a chip show only its part. -->
+            <ItemsControl ItemsSource="{Binding Chips}" Focusable="False" Margin="0,4,0,0"
+                          FlowDirection="{Binding ChipsFlow}">
+                <ItemsControl.Style>
+                    <Style TargetType="ItemsControl">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding HasChips}" Value="False">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ItemsControl.Style>
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="{Binding Background}" CornerRadius="9" Padding="8,1,8,2" Margin="0,2,6,2"
+                                ToolTipService.InitialShowDelay="250" ToolTipService.ShowDuration="60000">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasHover}" Value="True">
+                                            <Setter Property="ToolTip" Value="{StaticResource HoverTip}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <TextBlock Text="{Binding Label}" Foreground="{Binding Foreground}" FlowDirection="{Binding Flow}"
+                                       FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=10.5}"/>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
             <TextBlock Text="{Binding Description}" Foreground="#FF999999" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=10.5}"
                        TextWrapping="Wrap" Margin="0,2,0,0"
                        FlowDirection="{Binding Description, Converter={StaticResource Rtl}}">

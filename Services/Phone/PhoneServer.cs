@@ -246,11 +246,13 @@ public sealed class PhoneServer : IDisposable
         _log($"new session: card={card} group={(group.Length > 0 ? group : "-")}");
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         var r = await _backend.NewSessionAsync(card, group, cts.Token);
-        _log($"new session result: ok={r.Ok} error={r.Error ?? "-"} launching={r.Launching} id={r.SessionId ?? "-"}");
+        _log($"new session result: ok={r.Ok} error={r.Error ?? "-"} launching={r.Launching} id={r.SessionId ?? "-"}" +
+             (r.Picked != null ? $" picked=\"{r.Picked}\"" : ""));
         string? link = r.Ok && r.SessionId != null ? await WaitForLink(r.SessionId, TimeSpan.FromSeconds(10)) : null;
         return JsonResponse(r.Ok ? 200 : r.Error is "not_found" ? 404 : 409, new
         {
             ok = r.Ok, error = r.Error, detail = r.Detail, launching = r.Launching, sessionId = r.SessionId, link,
+            picked = r.Picked,
         });
     }
 
@@ -294,12 +296,13 @@ public sealed class PhoneServer : IDisposable
         _log($"task session: task={Trunc(id, 64)} option={(option.Length > 0 ? option : "-")}{(fast ? " fast" : "")}");
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         var r = await _backend.StartTaskAsync(id, option, fast, cts.Token);
-        _log($"task session result: ok={r.Ok} error={r.Error ?? "-"} launching={r.Launching} id={r.SessionId ?? "-"}");
+        _log($"task session result: ok={r.Ok} error={r.Error ?? "-"} launching={r.Launching} id={r.SessionId ?? "-"}" +
+             (r.Picked != null ? $" picked=\"{r.Picked}\"" : ""));
         string? link = r.Ok && r.SessionId != null ? await WaitForLink(r.SessionId, TimeSpan.FromSeconds(10)) : null;
         return JsonResponse(r.Ok ? 200 : r.Error is "no_task" ? 404 : 409, new
         {
             ok = r.Ok, error = r.Error, detail = r.Detail, launching = r.Launching, sessionId = r.SessionId, link,
-            prompt = r.Prompt,
+            prompt = r.Prompt, picked = r.Picked,
         });
     }
 

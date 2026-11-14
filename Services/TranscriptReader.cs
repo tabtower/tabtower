@@ -66,6 +66,12 @@ namespace TabTower.Services;
 /// extension, "cli"/"sdk-cli" for a terminal. Every message line carries it. Only a
 /// VSCode-hosted session may be closed when its VSCode window exits — a terminal session
 /// in the same folder outlives the window (decision 13 keeps the engine generic).</param>
+/// <param name="SessionKind">The <c>sessionKind</c> of the same newest line that names the host:
+/// "bg" for a `claude --bg` run (entrypoint "cli", like a terminal session, so the entrypoint cannot
+/// tell them apart), absent from an IDE session's lines. Taken from that one line, not from the
+/// newest line that has the field, so a background conversation reopened in the IDE stops reading
+/// as a background run with its first new line. Null when the line carries none, or when no line
+/// names a host yet.</param>
 /// <param name="LastMessageAtUtc">Timestamp of the newest line that has one — i.e. the
 /// last real conversation event. NOT the file's mtime: Claude Code appends a timestampless
 /// "last-prompt" record when a tab opens or closes, which bumps the mtime with no
@@ -89,7 +95,8 @@ public sealed record TranscriptInfo(
     bool EndsOnExit = false,
     string? Entrypoint = null,
     DateTime? LastMessageAtUtc = null,
-    IReadOnlyDictionary<string, string>? WorkflowRuns = null);
+    IReadOnlyDictionary<string, string>? WorkflowRuns = null,
+    string? SessionKind = null);
 
 /// <summary>What a session has spent, tallied from the <c>usage</c> block of every assistant
 /// turn in its transcript.
@@ -273,10 +280,10 @@ public static class TranscriptReader
 
             var (pending, foreground, monitors, jobs) = FindPendingCall(tail);
             bool endsOnExit = tail.Count > 0 && tail.Last().Contains(ExitMarker);
-            var (entrypoint, lastMessageAt) = ReadHostAndLastMessage(tail);
+            var (entrypoint, sessionKind, lastMessageAt) = ReadHostAndLastMessage(tail);
             return new TranscriptInfo(tabTitle, autoTitle, pending, candidates, lost,
                                       tokens.Result(), foreground, monitors, jobs, endsOnExit,
-                                      entrypoint, lastMessageAt, workflowRuns);
+                                      entrypoint, lastMessageAt, workflowRuns, sessionKind);
         }
         catch
         {
@@ -548,18 +555,19 @@ public static class TranscriptReader
         catch { return null; }
     }
 
-    /// <summary>Walk the tail newest-first for the two root-level fields the sweeps need:
-    /// the host this session runs in, and when it last actually said something.
+    /// <summary>Walk the tail newest-first for the root-level fields the sweeps need:
+    /// the host this session runs in (with the session kind of that same line), and when it
+    /// last actually said something.
     ///
     /// Read from the tail rather than the whole file on purpose. It is bounded (the file is
     /// multi-MB and the main loop is deliberately substring-based, not JSON-parsed), it is
     /// exact — a "timestamp" substring inside message content can't be mistaken for the
     /// root property — and for a resumed session it reflects the host it is running in
     /// NOW rather than the one it was born in.</summary>
-    private static (string? Entrypoint, DateTime? LastMessageAtUtc) ReadHostAndLastMessage(
+    private static (string? Entrypoint, string? SessionKind, DateTime? LastMessageAtUtc) ReadHostAndLastMessage(
         IEnumerable<string> tail)
     {
-        string? entrypoint = null;
+        string? entrypoint = null, sessionKind = null;
         DateTime? lastMessageAt = null;
         foreach (var line in tail.Reverse())
         {
@@ -570,7 +578,13 @@ public static class TranscriptReader
                 if (root.ValueKind != JsonValueKind.Object) continue;
                 if (entrypoint == null &&
                     root.TryGetProperty("entrypoint", out var ep) && ep.ValueKind == JsonValueKind.String)
+                {
                     entrypoint = ep.GetString();
+                    // The kind rides on the line that names the host: a resumed session's old
+                    // lines keep their own kind, and only the newest line says what it is now.
+                    if (root.TryGetProperty("sessionKind", out var sk) && sk.ValueKind == JsonValueKind.String)
+                        sessionKind = sk.GetString();
+                }
                 if (lastMessageAt == null &&
                     root.TryGetProperty("timestamp", out var ts) && ts.ValueKind == JsonValueKind.String &&
                     DateTime.TryParse(ts.GetString(), null,
@@ -581,7 +595,7 @@ public static class TranscriptReader
             catch { }
             if (entrypoint != null && lastMessageAt != null) break;
         }
-        return (entrypoint, lastMessageAt);
+        return (entrypoint, sessionKind, lastMessageAt);
     }
 
     /// <summary>A tool_use with no matching tool_result. For AskUserQuestion/ExitPlanMode

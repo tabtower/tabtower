@@ -172,7 +172,21 @@ public sealed class FakeBackend : IPhoneBackend
         "website" => new()
         {
             new("back", "Back to all projects", "", "", "nav", "#6E6E6E", true, false, false, true, "Back", null),
-            new("1.4", "Fix the contact form", "", "The send button does nothing on Safari.", "pending", "#2F6FDE", false, true, true, false, "", null),
+            new("1.4", "Fix the contact form", "", "The send button does nothing on Safari.", "pending", "#2F6FDE", false, true, true, false, "", null,
+                Chips: new List<PhoneChip>
+                {
+                    new("2 waiting for Dana", "#E07B00", "#FFFFFF", new PhoneHover("Waiting for Dana",
+                        new List<PhoneHoverSection> { new("Asked on Monday", "#E07B00", new List<PhoneHoverRow>
+                        {
+                            new("Approve the new copy", "1.4.1", new List<PhoneHoverDetail> { new("asked", "Mon 09:12"), new("by", "Shira") }),
+                            new("Send the logo files", "1.4.2", new List<PhoneHoverDetail>()),
+                        }, "") }, "", false)),
+                    new("1 blocked", "", "", null),
+                },
+                Hover: new PhoneHover("", new List<PhoneHoverSection>
+                {
+                    new("ממתין לתשובה", "#E07B00", new List<PhoneHoverRow> { new("אישור הטקסט החדש", "1.4.1", new List<PhoneHoverDetail>()) }, "ועוד 3"),   // RTL sample for the page. public-gate: allow
+                }, "עודכן היום", true)),   // public-gate: allow
             new("1.5", "Write the privacy page", "", "", "pending", "#2F6FDE", false, true, false, false, "", "https://example.com/spec"),
         },
         _ => new()

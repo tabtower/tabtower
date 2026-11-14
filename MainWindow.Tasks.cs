@@ -411,7 +411,11 @@ public partial class MainWindow
                 LogService.Info("tasks", $"task {task.Id} opens in \"{ws.DisplayTitle}\"" +
                                          (group != null ? $" ({group.Id})" : "") +
                                          $", not its own folder \"{task.WorkspacePath}\"");
-            var (sent, why) = NewSessionInVscode(ws, prompt, group);
+            void Open()
+            {
+                var (sent, why) = NewSessionInVscode(ws, prompt, group);
+            }
+            Open();
             return;
         }
         // A group's instance is started by its own launcher, never by a plain VSCode launch,

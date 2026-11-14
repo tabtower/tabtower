@@ -369,6 +369,37 @@ public static class SelfTest
         r = await server.Handle(Req("GET", "/api/tasks/find?id=%23billing", headers: Api()));
         Check(r.Status == 200 && J(r).GetProperty("task").GetProperty("canStart").GetBoolean(),
               "tasks: a number from another level is found through the launch index (a leading # tolerated)");
+        // A card's chips and the hover detail behind them and behind the card (0.11.52): what the
+        // PC shows on hover, which the page opens on a tap.
+        r = await server.Handle(Req("GET", "/api/tasks/find?id=1.4", headers: Api()));
+        var ft = J(r).GetProperty("task");
+        var chips = ft.GetProperty("chips");
+        Check(r.Status == 200 && chips.GetArrayLength() == 2 &&
+              chips[0].GetProperty("label").GetString() == "2 waiting for Dana" &&
+              chips[0].GetProperty("background").GetString() == "#E07B00" && chips[0].GetProperty("foreground").GetString() == "#FFFFFF",
+              "tasks: a card's chips come with their labels and colours");
+        var ch = chips[0].GetProperty("hover");
+        var row = ch.GetProperty("sections")[0].GetProperty("rows")[0];
+        Check(ch.GetProperty("title").GetString() == "Waiting for Dana" && !ch.GetProperty("rtl").GetBoolean() &&
+              ch.GetProperty("sections")[0].GetProperty("heading").GetString() == "Asked on Monday" &&
+              ch.GetProperty("sections")[0].GetProperty("color").GetString() == "#E07B00" &&
+              row.GetProperty("text").GetString() == "Approve the new copy" && row.GetProperty("number").GetString() == "1.4.1" &&
+              row.GetProperty("details").GetArrayLength() == 2 && row.GetProperty("details")[1].GetProperty("value").GetString() == "Shira",
+              "tasks: a chip's detail carries its title, sections, rows, numbers and label/value lines");
+        Check(chips[1].GetProperty("hover").ValueKind == JsonValueKind.Null,
+              "tasks: a chip with nothing behind it says so (the page draws it as a plain label)");
+        var th = ft.GetProperty("hover");
+        Check(th.GetProperty("rtl").GetBoolean() && th.GetProperty("footer").GetString()!.Length > 0 &&
+              th.GetProperty("sections")[0].GetProperty("more").GetString()!.Length > 0,
+              "tasks: the card's own detail comes too, with its direction, its 'and N more' line and its footer");
+        r = await server.Handle(Req("GET", "/api/tasks/find?id=1.5", headers: Api()));
+        Check(J(r).GetProperty("task").GetProperty("hover").ValueKind == JsonValueKind.Null &&
+              J(r).GetProperty("task").GetProperty("chips").ValueKind == JsonValueKind.Null,
+              "tasks: a card with no chips and no detail carries neither");
+        string page = Encoding.UTF8.GetString((await server.Handle(Req("GET", "/"))).Body);
+        Check(page.Contains("id=\"detail\"") && page.Contains("data-chip=") && page.Contains("openDetail(") &&
+              page.Contains("closeDetail(") && page.Contains("popstate"),
+              "page: a chip or a card tap opens a detail sheet, closed by its button, a tap outside, Esc or Back");
         r = await server.Handle(Req("GET", "/api/tasks/find?id=9.9.9", headers: Api()));
         Check(r.Status == 404 && Err(r) == "no_task", "tasks: an unknown number is not found");
         r = await server.Handle(Req("POST", "/api/tasks/start", headers: Api(), body: "{\"id\":\"billing\",\"option\":\"ctrl\"}"));

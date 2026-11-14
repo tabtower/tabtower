@@ -285,6 +285,17 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
         set { if (_entrypoint != value) { _entrypoint = value; Raise(); Raise(nameof(IsHeadless)); } }
     }
 
+    private string? _sessionKind;
+    /// <summary>The <c>sessionKind</c> Claude Code writes on a transcript line: "bg" for a
+    /// `claude --bg` run, which reports entrypoint "cli" like a terminal session and so cannot
+    /// be told from one by the entrypoint (0.11.64). Read from the transcript scan, not the hook,
+    /// which does not see it; null while no scan has read it.</summary>
+    public string? SessionKind
+    {
+        get => _sessionKind;
+        set { if (_sessionKind != value) { _sessionKind = value; Raise(); Raise(nameof(IsHeadless)); } }
+    }
+
     /// <summary>Nobody opened this session by hand: a scheduled task or a runner fired
     /// `claude --print`, and its hooks are indistinguishable from a real session's.
     ///
@@ -298,9 +309,10 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
     /// launched from inside an IDE session reports claude-vscode, and a batch of them lands on
     /// the card as four sessions the user can click, resume and be blinked at, none of which
     /// the user started (reported 18-08-2026). <see cref="PrintMode"/> closes it from the other side —
-    /// the process's own command line — and is ORed in here.</summary>
-    public bool IsHeadless =>
-        _printMode || (_entrypoint != null && _entrypoint.StartsWith("sdk", StringComparison.OrdinalIgnoreCase));
+    /// the process's own command line — and is ORed in here. The rule itself lives in
+    /// Services/HeadlessRun (0.11.60), shared with the tab-ownership checks. A `claude --bg` run
+    /// is headless too (0.11.64, <see cref="SessionKind"/>): it has no window and no tab.</summary>
+    public bool IsHeadless => HeadlessRun.Is(_printMode, _entrypoint, _sessionKind);
 
     private bool _printMode;
     /// <summary>This session is a `claude -p` run: nobody opened it, and there is nothing to
@@ -1168,6 +1180,45 @@ public sealed class SessionViewModel : INotifyPropertyChanged, IBlinkable
                    "The timer restarts on every request this session sends. A model switch, an " +
                    "effort change or a compaction rewrites the cache anyway." + holds;
         }
+    }
+
+    private string _liveElsewhereText = "";
+    private string _liveElsewhereTip = "";
+
+    /// <summary>A request to open this session that started nothing (0.11.63): Claude Code's session
+    /// registry shows its process running and no tab of it was found in its window, so a second
+    /// `claude --resume` would have written the same conversation. The card says so, not only the
+    /// status line the next status overwrites. The next request to open the session clears it, and
+    /// a closed session shows none. Runtime only.</summary>
+    public string LiveElsewhereText => _liveElsewhereText;
+    public string LiveElsewhereTip => _liveElsewhereTip;
+    public bool HasLiveElsewhere => _liveElsewhereText.Length > 0;
+
+    public void MarkLiveElsewhere(DateTime at)
+    {
+        // The card's own date format, as the send-failure line uses it.
+        string when = $"{at:HH:mm d'/'M}";
+        _liveElsewhereText = $"⚠ Still running in another process {when}: not resumed";
+        _liveElsewhereTip = $"At {when} this session was asked to open, but Claude Code's session registry shows its " +
+                            "process still running, and no tab of it was found in its window. A second `claude --resume` " +
+                            "would write the same conversation, so nothing was started. Look for its tab or terminal in " +
+                            "that window. This line goes with the next request to open the session, or when it ends.";
+        RaiseLiveElsewhere();
+    }
+
+    public void ClearLiveElsewhere()
+    {
+        if (_liveElsewhereText.Length == 0) return;
+        _liveElsewhereText = "";
+        _liveElsewhereTip = "";
+        RaiseLiveElsewhere();
+    }
+
+    private void RaiseLiveElsewhere()
+    {
+        Raise(nameof(LiveElsewhereText));
+        Raise(nameof(LiveElsewhereTip));
+        Raise(nameof(HasLiveElsewhere));
     }
 
     private static string MinutesLeft(TimeSpan span) =>

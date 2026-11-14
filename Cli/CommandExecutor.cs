@@ -19,7 +19,7 @@ public sealed class CommandExecutor
         "id", "workspace", "state", "path",
         "detail", "transcript", "source", "mode", "reason", "debug", "file", "agents", "entrypoint",
         "prompt", "page", "view", "dispatcher", "group", "config-dir", "after", "tasks", "pid",
-        "workflow", "workflows", "open",
+        "workflow", "workflows", "open", "label",
     };
 
     private readonly MainWindow _window;
@@ -49,13 +49,14 @@ public sealed class CommandExecutor
                 "toggle" => Toggle(args),
                 "tasks" => Tasks(args),
                 "groups" => Groups(),
+                "tabs" => Tabs(args),
                 "status" => Status(),
                 "reconcile" => Reconcile(),
                 "log" => LogCmd(args),
                 "activate" => Activate(),
                 "quit" => Quit(),
                 "snapshot" => Snapshot(args),   // internal: render the WPF tree to PNG (debug aid)
-                _ => Err($"unknown command '{args.Command}'. Available: list, add, remove, set, focus, pin, zone, stage, session, toggle, tasks, groups, status, reconcile, log, quit"),
+                _ => Err($"unknown command '{args.Command}'. Available: list, add, remove, set, focus, pin, zone, stage, session, toggle, tasks, groups, tabs, status, reconcile, log, quit"),
             };
         }
         catch (Exception ex)
@@ -316,13 +317,36 @@ public sealed class CommandExecutor
                 // Same order as a click on the card: pick the window first, so a folder
                 // open in two windows raises the one the session actually lives in.
                 _window.PointCardAtSessionWindow(ws, session);
-                _window.FocusWorkspace(ws);
-                var (sent, msg) = _window.OpenSessionInVscode(ws, session);
-                return sent ? Ok($"opening session {id} in VSCode") : Err(msg);
+                // --no-focus: wake a sleeping tab (one VSCode restored with no process behind
+                // it) where it is. The VSCode window is never brought to the front and never
+                // launched, and the window's previously active tab is handed back: a script that
+                // wakes sessions must not take the user's screen. Refused, with nothing sent,
+                // when the window is not connected or the session's tab is not in it.
+                bool focusOpen = !a.Flags.Contains("no-focus");
+                if (focusOpen) _window.FocusWorkspace(ws);
+                var (sent, msg) = _window.OpenSessionInVscode(ws, session, focus: focusOpen);
+                if (!sent) return Err(msg);
+                if (focusOpen) return Ok($"opening session {id} in VSCode");
+                return Ok(msg.Length > 0 ? msg : $"waking session {id} in its VSCode window, without focus");
             }
             case "list":
             {
                 var wanted = a.Options.GetValueOrDefault("workspace");
+                // --sleeping: the tabs VSCode still shows whose session has no process (restored
+                // after a reboot, or ended with the tab left open). `session open --no-focus`
+                // wakes one; the plain list leaves them out, because the deck has them as closed.
+                if (a.Flags.Contains("sleeping"))
+                {
+                    var sleeping = new StringBuilder();
+                    foreach (var (w, s, label, doubt) in _window.SleepingSessions())
+                    {
+                        if (wanted != null && !string.Equals(w.Name, wanted, StringComparison.OrdinalIgnoreCase)) continue;
+                        string where = s.HasGroup ? $" @{s.GroupLabel}" : "";
+                        sleeping.AppendLine($"{s.SessionId}  sleeping{where}  {w.DisplayTitle}  tab:\"{label}\"" +
+                                            (doubt.Length > 0 ? $"  [ambiguous: {doubt}]" : ""));
+                    }
+                    return Ok(sleeping.Length > 0 ? sleeping.ToString().TrimEnd() : "(no sleeping tabs)");
+                }
                 bool all = a.Flags.Contains("all");
                 var sb = new StringBuilder();
                 foreach (var w in Vm.Workspaces)
@@ -351,6 +375,36 @@ public sealed class CommandExecutor
             string mod = g.Modifier.Length == 0 ? "(no modifier)" : g.Modifier;
             sb.AppendLine($"{g.Id,-8} {mod,-12} {_window.GroupStateText(g),-42} {g.Name}");
             sb.AppendLine($"{"",-8} marker \"{g.TitleMarker}\"  in {g.WorkspacePath}");
+        }
+        return Ok(sb.ToString().TrimEnd());
+    }
+
+    /// <summary>`tabtower tabs [--group <id>]`: the Claude tabs of each group's window, each with the
+    /// session card that answers to it or "unassociated" (0.11.59). `tabtower tabs close
+    /// --group <id> --label "..."`: close ONE unassociated tab by its label, never revealing anything;
+    /// refused unless exactly one tab carries the label and no card answers to it (Services/TabLabelClose.cs).</summary>
+    private PipeResponse Tabs(ParsedArgs a)
+    {
+        string sub = a.Positionals.Count > 0 ? a.Positionals[0].ToLowerInvariant() : "";
+        string? group = a.Options.GetValueOrDefault("group");
+        if (sub == "close")
+        {
+            if (group == null) return Err("tabs close requires --group <id> (see: tabtower groups)");
+            if (!a.Options.TryGetValue("label", out var label)) return Err("tabs close requires --label \"<the tab's label>\"");
+            var (ok, msg) = _window.CloseUnassociatedTab(group, label);
+            return ok ? Ok(msg) : Err(msg);
+        }
+        if (sub.Length > 0) return Err("tabs requires: (nothing) | close");
+        if (group != null && _window.GroupById(group) == null) return Err($"unknown group '{group}' (see: tabtower groups)");
+        var rows = _window.WindowTabs(group);
+        if (rows.Count == 0) return Ok("(no connected window of a session group)");
+        var sb = new StringBuilder();
+        foreach (var r in rows)
+        {
+            sb.AppendLine($"{r.Group.Id,-8} pid={r.Conn.Pid} window-pid={r.Conn.OwnerPid} ext={(r.Conn.Version.Length > 0 ? r.Conn.Version : "pre-0.6.12")} eliminated={r.Eliminated}");
+            foreach (var t in r.Tabs)
+                sb.AppendLine($"  tab \"{t.Label.Replace("\"", "\\\"")}\"  {(t.HeldBy.Length > 0 ? "held-by " + t.HeldBy : "unassociated")}");
+            if (r.Tabs.Count == 0) sb.AppendLine("  (no Claude tab reported)");
         }
         return Ok(sb.ToString().TrimEnd());
     }
@@ -619,6 +673,7 @@ public sealed class CommandExecutor
         Mode: a.Options.GetValueOrDefault("mode"),
         Reason: a.Options.GetValueOrDefault("reason"),
         PermissionDialog: a.Flags.Contains("permission-dialog"),
+        FromSubagent: a.Flags.Contains("subagent"),
         Agents: int.TryParse(a.Options.GetValueOrDefault("agents"), out int agents) ? agents : null,
         // Sent on every Stop, empty string included, so a turn that ended with nothing
         // running clears the previous turn's list instead of leaving it to age.

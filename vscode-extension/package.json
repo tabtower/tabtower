@@ -2,7 +2,7 @@
   "name": "tabtower-connector",
   "displayName": "TabTower Connector",
   "description": "Reports Claude Code tabs and the git branch to TabTower, and opens/resumes Claude sessions on request.",
-  "version": "0.7.1",
+  "version": "0.7.3",
   "publisher": "tabtower",
   "repository": {
     "type": "git",
@@ -40,7 +40,7 @@
     "vscode:prepublish": "npm run licence && npm run compile",
     "licence": "node -e \"require('fs').copyFileSync('../LICENSE','LICENSE')\"",
     "compile": "tsc -p ./",
-    "test": "tsc -p ./ && node out/serialQueue.test.js",
+    "test": "tsc -p ./ && node out/serialQueue.test.js && node out/closeChoice.test.js",
     "package": "vsce package"
   },
   "devDependencies": {

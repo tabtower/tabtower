@@ -13,6 +13,8 @@
 
   <ItemGroup>
     <Compile Include="..\..\..\Services\RegistryRecovery.cs" Link="RegistryRecovery.cs" />
+    <!-- Which entrypoints run outside VS Code (0.11.68). -->
+    <Compile Include="..\..\..\Services\SessionHost.cs" Link="SessionHost.cs" />
     <Compile Include="..\..\..\Services\SessionRegistry.cs" Link="SessionRegistry.cs" />
     <!-- SessionRegistry.Probe classifies through RegistryState, which lives here. -->
     <Compile Include="..\..\..\Services\CloseTabRoute.cs" Link="CloseTabRoute.cs" />

@@ -119,6 +119,9 @@
   "task_link": "Link ›",
   "task_more": "More",
   "task_less": "Less",
+  "chip_detail_title": "Show what this chip counts",
+  "task_detail_title": "Tap to show this task's details",
+  "detail_close_title": "Close the details",
   "task_launch_text": "A new Claude Code session opens on the PC for {task}.",
   "task_launch_pick": "In which window:",
   "task_launch_default": "Open session",
@@ -137,5 +140,9 @@
   "toast_task_new": "New session opened. Its opening line is in the PC window, not sent yet:",
   "task_copy_open": "Copy it and open in the app ›",
   "task_copy": "Copy it",
-  "task_copied": "Copied"
+  "task_copied": "Copied",
+  "win_pick_title": "Open it in which window?",
+  "win_pick_text": "A new Claude Code session opens in \"{card}\" on the PC.",
+  "win_this": "this card's window",
+  "toast_picked": "Picked {group}."
 }

@@ -69,6 +69,10 @@ rules in-process, then a fixture registry over real hidden processes, where only
 pid is running with its recorded start time, from the VS Code extension's binary, gets a card.
 `release.ps1` does not run it yet.
 
+`tests\pathless-duplicates.tests.ps1` (no `-Exe`, nothing of the app is started) covers the rule
+that deletes a folderless duplicate card (`Services/PathlessDuplicate.cs`): the one card meant to
+go, and each condition violated on its own keeping the card. `release.ps1` does not run it yet.
+
 **These tests passing does not mean the status lifecycle works.** They cover the
 installer only. A card can stay blue, blink wrongly or go quiet while all of them pass:
 see "Debugging status and blink" below.
@@ -180,7 +184,7 @@ explain existing behaviour so a change is made knowingly.
 |---|---|
 | 11 | **Status scheme.** `idle` = grey, `working` = steady blue (orange is reserved for `waiting`), `waiting` = blinking orange, `done` = blinking purple → steady on acknowledge, `error` = blinking red → steady, `wrapped` = green (the session was closed out for good), `replaced` = steady white (handed off to a successor and killed; not an alert, so no blink). The status → colour/blink map lives in config (`StatusStyles`), so it changes without touching hooks or code. |
 | 12 | **A session that closes** disappears from the normal view and stays available in the card's expanded view (▼) with a resume option. Retention: the last ~20 closed sessions per workspace (`ClosedSessionRetention`). The expanded view collapses itself after five minutes, because being expanded is invisible once the header scrolls away. |
-| 13 | **VSCode only in the UI.** The engine underneath stays generic (any top-level window can be tracked, pinned and driven), but the UI and the flows are filtered to VSCode. |
+| 13 | **VSCode only in the UI.** The engine underneath stays generic (any top-level window can be tracked, pinned and driven), but the UI and the flows are filtered to VSCode. One exception: a session from the Claude desktop app (entrypoint `claude-desktop`) keeps its card, and clicking it raises the app's window and nothing more, since no `claude://` route was found that opens a given session. |
 | 15 | **The app is a control deck for Claude Code sessions**, not a generic window grid. Tile data from the pre-cards era is still round-tripped in config as a legacy field so nothing is lost, but it is never displayed. |
 | 16 | **Workspaces are persistent entities**: remembered with no window open. Active ones (bound window or live session) float to the top; old ones can be hidden. Wide cards with a minimum size, wrapping by width, inside a vertical scroll area. |
 | 17 | **Main card content:** project name + the current git branch. Custom title and description are supported on both card levels. |

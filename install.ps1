@@ -216,10 +216,12 @@ if ($resolvedSrc -ieq $resolvedDst) {
         # script died there and left the install dir half on the new publish and half on the old,
         # with the app shut down. A client lives a second or two, so a few spaced retries clear
         # it; a genuinely held file still fails, loudly, at the end rather than mid-way.
+        # The window is 30 s, not 3: on 26-10-2026 back-to-back hook clients held TabTower.dll
+        # past eight 400 ms retries, the copy threw, and the deck stayed down about a minute.
         $copied = $false
-        for ($try = 1; $try -le 8 -and -not $copied; $try++) {
+        for ($try = 1; $try -le 60 -and -not $copied; $try++) {
             try { Copy-Item -Path $file.FullName -Destination $target -Force -ErrorAction Stop; $copied = $true }
-            catch { if ($try -eq 8) { throw } ; Start-Sleep -Milliseconds 400 }
+            catch { if ($try -eq 60) { throw } ; Start-Sleep -Milliseconds 500 }
         }
         $written++
         $writtenBytes += $file.Length

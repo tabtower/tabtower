@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Test harness for scoping the elimination claim to the window (0.11.59). It compiles the
+       app's own EliminationScope source (linked, not copied), so the rule under test is exactly
+       the code that ships, without starting the app. See tests/elimination-scope.tests.ps1. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>EliminationHarness</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\..\Services\EliminationScope.cs" Link="EliminationScope.cs" />
+    <Compile Include="..\..\..\Services\HeadlessRun.cs" Link="HeadlessRun.cs" />
+    <Compile Include="..\..\..\Services\SessionHost.cs" Link="SessionHost.cs" />
+  </ItemGroup>
+
+</Project>

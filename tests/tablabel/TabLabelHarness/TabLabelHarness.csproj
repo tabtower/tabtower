@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Test harness for closing an unassociated tab by label (0.11.59). It compiles
+       the app's own TabLabelClose source (linked, not copied), so the rule under test is exactly the
+       code that ships, without starting the app. See tests/tab-label-close.tests.ps1. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>TabLabelHarness</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\..\Services\TabLabelClose.cs" Link="TabLabelClose.cs" />
+  </ItemGroup>
+
+</Project>

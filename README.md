@@ -158,7 +158,19 @@ The UI is English and left-to-right, but anything that comes from **outside** th
 
 **Requirements:** Windows 10/11, and VS Code with the Claude Code extension. No .NET runtime needed: the release build is self-contained.
 
-A note on what depends on what: the **hooks** are what colour the cards, and they work anywhere Claude Code runs: a session in a terminal will appear on the deck with a live status like any other. What needs the VS Code extension is everything that treats a session as a *tab*: revealing it on click, the live tab titles, and the auto-acknowledge when you answer a session in VS Code without touching the deck. Neither macOS nor Linux is supported, and the window layer (DWM thumbnails, the AppBar zone) is Windows-specific enough that this is unlikely to change.
+A note on what depends on what: the **hooks** are what colour the cards, and they work anywhere Claude Code runs, so a session you start with `claude` in a terminal, or in the Code tab of Claude Desktop, gets a card too. What needs the VS Code extension is everything that treats a session as a *tab*:
+
+| | VS Code | Terminal (`claude`) | Claude Desktop (Code tab) |
+|---|---|---|---|
+| A card with live status, title, token count, context window use and cache countdown | Yes | Yes | Yes |
+| Notifications and the taskbar badge | Yes | Yes | Yes |
+| The session on the phone page, to watch | Yes | Yes | Yes |
+| A click opens that exact session; answering it there clears its alert | Yes | No | No |
+| Close a session, open a new one (`session new`, `--no-focus`) | Yes | No | No |
+| Live window previews and session groups | Yes | No | No |
+| Phone actions: open, new, close, Reopen | Yes | No | No |
+
+Outside VS Code a click on a card stops its blink but does not take you to the session, and a notification brings up the deck rather than the session. A terminal session keeps its card while its process runs. Claude Desktop is status only: its card tells you what the session is doing, and a click on it brings the Claude app's window to the front, where you pick the session in the app's sidebar (TabTower cannot open that exact session in the app). Neither macOS nor Linux is supported, and the window layer (DWM thumbnails, the AppBar zone) is Windows-specific enough that this is unlikely to change.
 
 Install with the two steps under [Install](#install) at the top of this page.
 
@@ -212,13 +224,13 @@ tabtower doctor                       # check the hooks and the VS Code extensio
 
 tabtower session start  --id <session_id> --workspace <name> [--title "..."]
 tabtower session status --id <session_id> --state working|waiting|done|wrapped|replaced|error|idle
-tabtower session open   --id <session_id>
+tabtower session open   --id <session_id> [--no-focus]   # --no-focus: wake a sleeping tab in place
 tabtower session end    --id <session_id> [--close-tab]
 tabtower session close-tab --id <session_id>              # close a live session's tab by id
 tabtower session pin    --id <session_id> [--off]          # pin a session to the top of its window
 tabtower session board  --id <session_id> --open <n> | --off   # mark a board session and its open questions
 tabtower session new    <target> [--prompt "..."] [--group <id>] [--after <sid>] [--no-focus]
-tabtower session list   [--workspace <name>] [--all]
+tabtower session list   [--workspace <name>] [--all | --sleeping]   # --sleeping: tabs with no process
 ```
 
 `<target>` is a stable numeric workspace id or `--match "<regex>"`. Exit code 0 on success, non-zero with a message on stderr otherwise.

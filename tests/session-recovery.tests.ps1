@@ -16,6 +16,11 @@
        - a live session with no transcript yet                       -> skipped
        - a card closed as orphaned whose process is live             -> revived
        - a card closed as replaced whose process is live             -> left closed
+       - a terminal session (entrypoint cli) and a Claude Desktop one (claude-desktop), live
+         processes outside the extension folder, with transcripts     -> card created (0.11.68)
+       - a `claude --bg` run (entrypoint cli, kind bg)                -> skipped
+     Then `probe` over the same registry: a session whose process is running reads Live, which
+     keeps a card click from resuming it in a terminal beside that process (0.11.62).
      It never touches a running TabTower, its pipe, its config or the real registry. The processes
      it starts are copies of ping.exe, hidden, and it stops them itself.
 
@@ -62,6 +67,9 @@ try {
         notyet    = '55555555-5555-4555-8555-555555555555'
         orphaned  = '66666666-6666-4666-8666-666666666666'
         replaced  = '77777777-7777-4777-8777-777777777777'
+        terminal  = '99999999-9999-4999-8999-999999999991'
+        desktop   = '99999999-9999-4999-8999-999999999992'
+        bgrun     = '99999999-9999-4999-8999-999999999993'
     }
     $records = @(
         @{ file = '1'; id = $ids.live;     pid = $ide.Id;  start = (Start-Of $ide) }
@@ -71,10 +79,14 @@ try {
         @{ file = '5'; id = $ids.notyet;   pid = $ide.Id;  start = (Start-Of $ide) }
         @{ file = '6'; id = $ids.orphaned; pid = $ide.Id;  start = (Start-Of $ide) }
         @{ file = '7'; id = $ids.replaced; pid = $ide.Id;  start = (Start-Of $ide) }
+        @{ file = '8'; id = $ids.terminal; pid = $cli.Id;  start = (Start-Of $cli); entrypoint = 'cli' }
+        @{ file = '9'; id = $ids.desktop;  pid = $cli.Id;  start = (Start-Of $cli); entrypoint = 'claude-desktop' }
+        @{ file = '10'; id = $ids.bgrun;   pid = $cli.Id;  start = (Start-Of $cli); entrypoint = 'cli'; kind = 'bg' }
     )
     foreach ($r in $records) {
         $json = [ordered]@{ pid = $r.pid; sessionId = $r.id; cwd = $cwd; procStart = $r.start
-                            kind = 'interactive'; entrypoint = 'claude-vscode' } | ConvertTo-Json
+                            kind = $(if ($r.kind) { $r.kind } else { 'interactive' })
+                            entrypoint = $(if ($r.entrypoint) { $r.entrypoint } else { 'claude-vscode' }) } | ConvertTo-Json
         [IO.File]::WriteAllText((Join-Path $sessions "$($r.file).json"), $json)
         if ($r.id -ne $ids.notyet) { [IO.File]::WriteAllText((Join-Path $projects "$slug\$($r.id).jsonl"), '{}') }
     }
@@ -91,8 +103,31 @@ try {
     Check ((Line $ids.notyet) -match '^SKIP .*transcript') 'live session with no transcript yet: no card'
     Check ((Line $ids.orphaned) -match '^REVIVE') 'card closed as orphaned, process live: revived'
     Check ((Line $ids.replaced) -match '^SKIP') 'card closed as replaced: left closed'
+    Check ((Line $ids.terminal) -match '^CREATE') 'live terminal session outside the extension folder: card created (0.11.68)'
+    Check ((Line $ids.desktop) -match '^CREATE') 'live Claude Desktop session: card created (0.11.68)'
+    Check ((Line $ids.bgrun) -match '^SKIP .*kind=bg') '`claude --bg` run: no card'
     $cards = @($out | Select-Object -Skip (([array]::IndexOf($out, 'CARDS:')) + 1) | ForEach-Object { $_.Trim() })
-    Check (($cards -join ',') -eq "$($ids.live),$($ids.orphaned)") 'resulting card list is exactly the live and the revived session'
+    Check (($cards -join ',') -eq "$($ids.live),$($ids.orphaned),$($ids.terminal),$($ids.desktop)") 'resulting card list is exactly the live, the revived, the terminal and the Desktop session'
+    # D1 (0.11.68): the orphan sweep keeps a terminal or Desktop card while SessionRegistry.Probe reads
+    # Live for it; the probe below is that read, over the same fixture.
+
+    # 0.11.62: a card click resumes a session in a terminal only when the registry does not show its
+    # process running (MainWindow.OpenSessionInVscode over SessionRegistry.Probe). The live record is
+    # the 03-11-2026 shape: a running process from the extension's folder with its true start time,
+    # where the click opened a second `claude --resume` beside it.
+    $savedConfigDir = $env:CLAUDE_CONFIG_DIR
+    $env:CLAUDE_CONFIG_DIR = $root
+    try {
+        function Probe([string]$id) { (& $exe probe $id) -join ' ' }
+        Check ((Probe $ids.live) -match '^Live$') 'probe: its own process is running, so no terminal resume'
+        Check ((Probe $ids.headless) -match '^Live$') 'probe: a running CLI process counts the same'
+        Check ((Probe $ids.terminal) -match '^Live$') 'probe: a terminal session whose process runs reads Live, so the orphan sweep keeps its card'
+        Check ((Probe $ids.desktop) -match '^Live$') 'probe: a Desktop session whose process runs reads Live, so the orphan sweep keeps its card'
+        Check ((Probe $ids.dead) -match '^Gone') 'probe: its process has exited, so the terminal resume goes'
+        Check ((Probe $ids.recycled) -match '^Gone') 'probe: its pid now runs with another start time, so the terminal resume goes'
+        Check ((Probe '88888888-8888-4888-8888-888888888888') -match '^Gone') 'probe: no process registered for it, so the terminal resume goes'
+    }
+    finally { $env:CLAUDE_CONFIG_DIR = $savedConfigDir }
 }
 finally {
     foreach ($p in @($ide, $cli)) { if (-not $p.HasExited) { Stop-Process -Id $p.Id -ErrorAction SilentlyContinue } }

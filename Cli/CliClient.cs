@@ -92,6 +92,10 @@ public static class CliClient
                                                   --page opens/closes the full page
         tabtower groups                        the VSCode instances a new session can be aimed at
                                                   (the session groups) and whether each is reachable
+        tabtower tabs [--group <id>]           the Claude tabs of each group's window, each with the
+                                                  session that answers to it, or "unassociated"
+        tabtower tabs close --group <id> --label "..."   close ONE unassociated tab by its label (no reveal);
+                                                  refused while any session answers to it or two tabs share it
         tabtower help
 
         session commands (called by the Claude Code hooks):

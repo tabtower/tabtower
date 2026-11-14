@@ -147,6 +147,13 @@ public sealed class WorkspaceViewModel : INotifyPropertyChanged
         Raise(nameof(ClaudeTabsTooltip));
     }
 
+    /// <summary>For each tab label in <see cref="ClaudeTabLabels"/>, the groups (windows) of the
+    /// connectors that report it, "" for a connector whose group could not be identified. Empty
+    /// on a card with no groups. Read only by the elimination claim (Services/EliminationScope),
+    /// which must not hand a tab to a session of a window that does not show it (0.11.59).</summary>
+    public IReadOnlyDictionary<string, HashSet<string>> TabLabelGroups { get; set; }
+        = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
     // ---- the card's badge (optional, from config.json BadgesFile) ----
     //
     // A small pill in the card header that an external tool fills in: whatever is worth

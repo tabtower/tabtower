@@ -94,6 +94,8 @@ backend call hops onto the UI thread and calls the methods the CLI calls (`NewSe
 | File | What it owns |
 |---|---|
 | `RegistryRecovery.cs` / `SessionRegistry.cs` | Cards for sessions the deck never heard start (their hooks fired while it was not running). At startup, and again 60s later, `RecoverLiveSessions` reads Claude Code's `sessions/*.json`; a record earns a card only with its identity proven (running pid with the recorded start time, the extension's own binary, a transcript on disk), and a card the deck closed on a guess (orphaned, stale, exited) is reopened. Pure rules testable without the app: `tests/session-recovery.tests.ps1`. |
+| `PathlessDuplicate.cs` | The rule that retires a folderless duplicate card (a drag-in's card whose window a card with the folder already owns), and the title cut the drag-in names a card with. `RetirePathlessDuplicates` in `MainWindow.xaml.cs` does the removal on the 10s metadata tick. Free of WPF; tests: `tests/pathless-duplicates.tests.ps1`. |
+| `HeadlessRun.cs` / `EliminationScope.cs` | Whether a session is a headless run (`claude -p` / SDK: print mode proven by the hook, or an `sdk-*` entrypoint; a `claude --bg` run by the transcript's `sessionKind` "bg", 0.11.64), and what the elimination claim may hand out: never a tab to a headless run (`MayHoldTab`, 0.11.60), never a tab only another window shows. Free of WPF; tests: `tests/elimination-scope.tests.ps1`. |
 | `TranscriptReader.cs` | Single pass over a `.jsonl`: titles, label candidates, and the pending tool call. All the "what is Claude doing" intelligence is here. |
 | `WorkspaceMetadata.cs` | Reads the branch from `.git/HEAD` directly (no git.exe) and the colour from `.vscode/settings.json`. Also the window-title pattern. |
 | `ConfigStore.cs` | Auto-save with a 1s debounce, atomic write (temp + rename). There is no save button. |
@@ -114,7 +116,12 @@ deck for the tasks page. `TasksPageView` is that page: live session squares on t
 task list in the middle, and on the right the **navigation grid**: two vertical columns of
 numbered squares (the tree's top level, and the selected top-level item's direct children)
 drawn from the optional `navIndex` the tasks file may carry. Column A only previews; column B
-navigates. Without a `navIndex` no grid is drawn at all. `WorkspaceCardView` is one card, and its code-behind is almost
+navigates. Without a `navIndex` no grid is drawn at all. `TaskItemView` is one task card; a
+task may carry `statusStyle: "pill"` (the status as a filled badge), `chips` (a row of short
+labelled counts, each with its own hover) and `hover` (a structured panel behind the card). The
+hover shapes live in `Models/TasksFile.cs` and resolve in `ViewModels/TaskHoverViewModel.cs`;
+`tests/cards/CardsRender` renders cards and their hovers from a tasks file to a PNG offscreen.
+`WorkspaceCardView` is one card, and its code-behind is almost
 entirely DWM thumbnail maths (registering, clipping to the scroll viewport, letterboxing).
 `App.xaml` holds the app-wide styles and, importantly, applies the direction converter to
 every tooltip, menu item and combo item.

@@ -12,13 +12,22 @@ namespace RecoveryHarness;
 //                  app's own SessionRegistry.ReadRecords (real pid and start-time checks, real
 //                  process paths, real transcript lookup), plans with RegistryRecovery.Plan against
 //                  the --known cards, and prints one line per record plus the resulting card list.
+//
+//   probe <id>     SessionRegistry.Probe over the registry CLAUDE_CONFIG_DIR points at: "Live", or
+//                  the state and why. A card click never resumes a Live session in a terminal (0.11.62).
 public static class Program
 {
     public static int Main(string[] args)
     {
         if (args.Length > 0 && args[0] == "selftest") return SelfTest();
         if (args.Length > 0 && args[0] == "plan") return PlanCommand(args);
-        Console.Error.WriteLine("usage: RecoveryHarness selftest | plan --sessions-dir D --projects-dir P [--known id=open|closed:reason]...");
+        if (args.Length == 2 && args[0] == "probe")
+        {
+            var (state, why) = SessionRegistry.Probe(args[1]);
+            Console.WriteLine(why.Length > 0 ? $"{state}: {why}" : $"{state}");
+            return 0;
+        }
+        Console.Error.WriteLine("usage: RecoveryHarness selftest | plan --sessions-dir D --projects-dir P [--known id=open|closed:reason]... | probe <id>");
         return 2;
     }
 
@@ -82,6 +91,20 @@ public static class Program
         Check(A(Live() with { IdeBinary = false }) == RecoveryAction.Skip, "claude -p started from inside an IDE session: skipped");
         Check(A(Live() with { Transcript = null }) == RecoveryAction.Skip, "no transcript yet: skipped");
         Check(A(Live() with { Cwd = null }) == RecoveryAction.Skip, "no cwd: skipped");
+
+        // Outside VS Code (0.11.68): a terminal or Claude Desktop session is recovered on the same
+        // identity proof, without the IDE-binary test that has no counterpart there.
+        RegistryRecord Outside(string entrypoint) => Live() with { Entrypoint = entrypoint, IdeBinary = false };
+        Check(A(Outside("cli")) == RecoveryAction.Create, "live terminal session the deck does not know: card created");
+        Check(A(Outside("claude-desktop")) == RecoveryAction.Create, "live Claude Desktop session the deck does not know: card created");
+        Check(A(Outside("cli") with { Kind = "bg" }) == RecoveryAction.Skip, "`claude --bg` run (kind bg): skipped");
+        Check(A(Outside("claude-desktop") with { ProcessVerified = false }) == RecoveryAction.Skip, "Desktop session whose process is gone: skipped");
+        Check(A(Outside("cli") with { ProcStart = null }) == RecoveryAction.Skip, "terminal session with no recorded start time: skipped");
+        Check(A(Outside("claude-desktop") with { Transcript = null }) == RecoveryAction.Skip, "Desktop process with no transcript (a pre-started spare): skipped");
+        Check(A(Outside("cli"), new KnownSession(true, "orphaned")) == RecoveryAction.Revive, "terminal card closed as orphaned, process alive: revived");
+        Check(A(Outside("claude-desktop"), new KnownSession(true, "other")) == RecoveryAction.Skip, "Desktop card a hook closed: left for its next hook");
+        Check(A(Outside("CLI")) == RecoveryAction.Skip, "an entrypoint spelled differently: skipped (not guessed)");
+        Check(A(Outside("sdk-ts")) == RecoveryAction.Skip, "sdk-* run outside the IDE binary: skipped");
 
         Check(A(Live(), new KnownSession(false, null)) == RecoveryAction.Skip, "already open on the deck: untouched");
         foreach (var reason in new[] { "orphaned", "stale", "exited" })

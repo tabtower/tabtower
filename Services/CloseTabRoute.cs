@@ -41,6 +41,21 @@ public enum CloseTabAction
 /// went wrong that day.</summary>
 public static class CloseTabRoute
 {
+    /// <summary>May the connector close this session's tab IN PLACE, without revealing it first
+    /// (0.11.51, connector 0.7.3)? Only when exactly one of the window's tabs answers to the session
+    /// and no other LIVE session answers to that tab's label: then the label alone names the tab.
+    /// Anything else (a label two tabs share, or a fork or a resume that answers to the same
+    /// opening prompt) keeps the reveal, which asks Claude Code's own id-to-panel registry. The
+    /// connector checks the same thing again on its side, against its own tabs, and falls back to
+    /// the reveal when it disagrees. A CLOSED session is left out on purpose: its leftover tab, if
+    /// any, is a second tab carrying the label, and the connector's count of one catches it.</summary>
+    public static bool ClosesInPlace(IReadOnlyList<string> windowTabLabels, Func<string, bool> isItsTab,
+                                     Func<string, bool> anotherLiveSessionAnswers)
+    {
+        var its = windowTabLabels.Where(isItsTab).ToList();
+        return its.Count == 1 && !anotherLiveSessionAnswers(its[0]);
+    }
+
     public static (CloseTabAction Action, string Why) Decide(
         bool replaced, bool closed, ProcessState process, string processWhy,
         bool hasConnector, bool supportsById, string connectorVersion)

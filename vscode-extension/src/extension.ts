@@ -17,6 +17,10 @@
 // it reveals by session id and closes what the reveal put in front — see closeClaudeTabById.
 // "newSession" with AfterSessionId / NoFocus (v0.6.14) opens the tab next to a live session's
 // tab and hands the window's previously active tab back — see openNewSessionQuietly.
+// "openSession" with NoFocus (v0.7.2) wakes a sleeping tab and hands the window's previously active
+// tab and editor group back — see wakeSessionQuietly.
+// "closeSession" with ById and Unique (v0.7.3) closes the session's tab where it is, without the
+// reveal, when its label names exactly one Claude tab here — see closeClaudeTabById.
 // Commands run ONE AT A TIME (v0.7.1): each of them moves and then reads the window's active tab,
 // so two side by side read each other's moves as their own — see serialQueue.ts.
 
@@ -25,11 +29,13 @@ import * as net from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
 import { SerialQueue } from './serialQueue';
+import { inPlaceTarget, labelMatches } from './closeChoice';
 
 const PIPE_PATH = '\\\\.\\pipe\\tabtower';
 const RECONNECT_MS = 5000;
 const SYNC_DEBOUNCE_MS = 300;
 const HEARTBEAT_MS = 2000;         // must stay well under TabTower's ActiveTabTtl
+const WAKE_SETTLE_MS = 500;        // a woken tab stays active this long before the hand-back
 const CLAUDE_VIEWTYPE = 'claudeVSCodePanel';   // actual viewType is prefixed (mainThreadWebview-...)
 const RELEASES_URL = 'https://github.com/tabtower/tabtower/releases/latest';
 const APP_MISSING_GRACE_MS = 20000;
@@ -153,7 +159,11 @@ async function handleCommand(raw: string): Promise<void> {
         // Terminal (0.6.15): resume through the CLI instead of Claude Code's reveal-or-resume.
         // Asked for when the session is known to be DEAD — see resumeInTerminal.
         const viaTerminal: boolean = !!(cmd.Terminal ?? cmd.terminal);
-        if (sessionId && viaTerminal) {
+        // NoFocus (0.7.2): wake a sleeping tab in place and hand the previous tab back.
+        const noFocus: boolean = !!(cmd.NoFocus ?? cmd.noFocus);
+        if (sessionId && noFocus) {
+            await wakeSessionQuietly(sessionId);
+        } else if (sessionId && viaTerminal) {
             resumeInTerminal(sessionId);
         } else if (sessionId) {
             await openClaudePanel(sessionId, cmd.Maximize ?? cmd.maximize, undefined);
@@ -177,8 +187,10 @@ async function handleCommand(raw: string): Promise<void> {
         // session is alive, so the reveal is allowed. Without it the by-label path stands,
         // which is the only safe one for a session whose process is already dead.
         const byId: boolean = !!(cmd.ById ?? cmd.byId);
+        // Unique (0.7.3): TabTower vouches that no other live session answers to the tab's label.
+        const unique: boolean = !!(cmd.Unique ?? cmd.unique);
         if (sessionId && byId) {
-            await closeClaudeTabById(sessionId, labels);
+            await closeClaudeTabById(sessionId, labels, unique);
         } else if (sessionId) {
             await closeClaudeTab(sessionId, labels);
         }
@@ -251,6 +263,60 @@ async function openNewSessionQuietly(afterSessionId: string | undefined, noFocus
     await handBackActiveTab('newSession quietly', group.viewColumn, previous, previousLabel, previousInput);
 }
 
+/// Wake a SLEEPING tab: one VSCode restored (after a reboot, say) whose Claude Code panel was
+/// never revived, so no `claude` process runs behind it. Making the tab active is what revives
+/// it - VSCode calls Claude Code's panel serializer, which starts the process - and
+/// `claude-vscode.editor.open` with the id does exactly that for a remembered tab: it focuses the
+/// tab's editor group and activates the tab, without a new panel. TabTower sends this only for a
+/// session whose tab it sees in this window, and it has left the OS window where it was.
+///
+/// Inside the window the woken tab is active for WAKE_SETTLE_MS, then the editor group and the
+/// tab that were active before are handed back; Claude Code's panels keep running while hidden
+/// (retainContextWhenHidden), as on the newSession quiet path. The reveal may have moved the
+/// active editor group, and handBackActiveTab refuses to act across groups, so the original group
+/// is focused first. No layout change, and no terminal fallback: a terminal resume beside a
+/// remembered tab would be a second process on the same session.
+async function wakeSessionQuietly(sessionId: string): Promise<void> {
+    out.appendLine(`openSession ${sessionId} quietly (wake, no focus)`);
+    const group = vscode.window.tabGroups.activeTabGroup;
+    const column = group.viewColumn;
+    const previous = group.activeTab;
+    const previousLabel = previous?.label;
+    const previousInput = previous?.input;
+    try {
+        await vscode.commands.executeCommand('claude-vscode.editor.open', sessionId, undefined, vscode.ViewColumn.Active);
+    } catch (e) {
+        out.appendLine(`openSession quietly: claude-vscode.editor.open failed (${e}) — nothing woken`);
+        return;
+    }
+    if (!previous) {
+        return;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, WAKE_SETTLE_MS));
+    if (vscode.window.tabGroups.activeTabGroup.viewColumn !== column) {
+        await focusEditorGroup('openSession quietly', column);
+    }
+    await handBackActiveTab('openSession quietly', column, previous, previousLabel, previousInput);
+}
+
+/// Focus the editor group in <column>, by the workbench's own focus-Nth-group commands (there
+/// are eight). Anything else is left as it is, and handBackActiveTab then says so.
+async function focusEditorGroup(what: string, column: vscode.ViewColumn | undefined): Promise<void> {
+    const commandsByColumn = ['workbench.action.focusFirstEditorGroup', 'workbench.action.focusSecondEditorGroup',
+        'workbench.action.focusThirdEditorGroup', 'workbench.action.focusFourthEditorGroup',
+        'workbench.action.focusFifthEditorGroup', 'workbench.action.focusSixthEditorGroup',
+        'workbench.action.focusSeventhEditorGroup', 'workbench.action.focusEighthEditorGroup'];
+    const command = column !== undefined && column >= 1 ? commandsByColumn[column - 1] : undefined;
+    if (!command) {
+        return;
+    }
+    try {
+        await vscode.commands.executeCommand(command);
+    } catch (e) {
+        out.appendLine(`${what}: could not focus editor group ${column} again (${e})`);
+    }
+}
+
 /// Re-activate the tab that was active before we opened or closed one. Only within the same
 /// editor group, and only if that tab is still there; anything else is left as VSCode made it,
 /// because `workbench.action.openEditorAtIndex` acts on whichever group is active now and a
@@ -300,18 +366,6 @@ function sameInput(a: unknown, b: unknown): boolean {
 
 /// VSCode truncates a long tab label with a trailing '…', so a truncated label matches any
 /// title it prefixes — the same rule TabTower's own correlation uses (TabLabelMatches).
-function labelMatches(label: string, titles: string[]): boolean {
-    for (const t of titles) {
-        if (label === t) {
-            return true;
-        }
-        if (label.endsWith('…') && label.length > 1 && t.startsWith(label.slice(0, -1))) {
-            return true;
-        }
-    }
-    return false;
-}
-
 function isClaudeTab(tab: vscode.Tab | undefined): boolean {
     return !!tab && tab.input instanceof vscode.TabInputWebview && tab.input.viewType.includes(CLAUDE_VIEWTYPE);
 }
@@ -409,12 +463,31 @@ function activeTabPosition(): TabPosition | undefined {
 /// MOVE, the reveal may have done nothing at all (Claude Code's preferred location can be the
 /// side bar, which takes no tab), so that case is only accepted when the label agrees. The
 /// window's previously active tab is handed back afterwards, as on the newSession path.
-async function closeClaudeTabById(sessionId: string, labels: string[]): Promise<void> {
-    out.appendLine(`closeSession ${sessionId} by id (labels: ${labels.join(' | ') || '-'})`);
+///
+/// IN PLACE (0.7.3). The reveal is what made the screen jump: in all 64 logged by-id closes the
+/// tab was brought to the front first, and three times the user was left on a different tab. So
+/// when TabTower vouches (Unique) that no other live session answers to the label, and exactly one
+/// Claude tab in this window, across every group, carries one of the labels, that tab is closed
+/// where it is, with preserveFocus, and nothing is revealed or handed back. Every other case keeps
+/// the reveal below.
+async function closeClaudeTabById(sessionId: string, labels: string[], unique: boolean): Promise<void> {
+    out.appendLine(`closeSession ${sessionId} by id (labels: ${labels.join(' | ') || '-'}, unique=${unique})`);
     const beforeCount = claudeTabCount();
     if (beforeCount === 0) {
         out.appendLine('closeSession by id: this window has no Claude tab at all — nothing to close');
         return;
+    }
+    if (unique) {
+        const tabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+            .map((t) => ({ label: t.label, claude: isClaudeTab(t), tab: t }));
+        const target = inPlaceTarget(tabs, labels, true);
+        if (target) {
+            const ok = await vscode.window.tabGroups.close(target.tab, true);
+            out.appendLine(`closeSession by id: ${ok ? 'closed' : 'close refused'} "${target.label}" in place ` +
+                '(the only tab carrying its label; nothing revealed)');
+            return;
+        }
+        out.appendLine('closeSession by id: its label does not name exactly one Claude tab here — revealing it first');
     }
     const before = activeTabPosition();
     if (!await revealSession(sessionId)) {

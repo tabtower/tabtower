@@ -70,6 +70,17 @@ public sealed class VscodeConnection
     /// only a window that reported 0.6.16.</summary>
     public bool SupportsCloseSessionById => VersionAtLeast(0, 6, 16);
 
+    /// <summary>openSession with NoFocus (v0.7.2): wake a sleeping tab and hand the window's
+    /// previously active tab and editor group back afterwards. An older window drops the flag and
+    /// leaves the woken tab active inside the window; the deck sends it all the same, because
+    /// the OS window is not raised either way, and says so in its answer.</summary>
+    public bool SupportsQuietWake => VersionAtLeast(0, 7, 2);
+
+    /// <summary>closeSession with Unique (v0.7.3): close the one tab carrying the session's label
+    /// where it is, without revealing it first. An older window drops the flag and reveals as
+    /// before, bringing the tab to the front for a moment.</summary>
+    public bool SupportsCloseInPlace => VersionAtLeast(0, 7, 3);
+
     private bool VersionAtLeast(int major, int minor, int patch)
     {
         var parts = Version.Split('.');

@@ -325,7 +325,8 @@
                                     <!-- primary: the VSCode tab title; wraps instead of truncating -->
                                     <TextBlock Text="{Binding DisplayTitle}" Foreground="White" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=12}"
                                                TextWrapping="Wrap"
-                                               FlowDirection="{Binding DisplayTitle, Converter={StaticResource Rtl}}"/>
+                                               FlowDirection="{Binding DisplayTitle, Converter={StaticResource Rtl}}">
+                                    </TextBlock>
                                     <!-- secondary session title (AutoTitle via SubTitle) removed by request
                                          2026-07-19; the VM property still exists. To restore, re-add here a
                                          TextBlock bound to SubTitle (wrap + Rtl converter, collapsed when ""). -->
@@ -336,6 +337,26 @@
                                             <Style TargetType="TextBlock">
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding SubText}" Value="">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <!-- A request to open the session that started nothing (0.11.63): its
+                                         process is still running and no tab of it was found in its window,
+                                         so a second `claude resume` would write the same conversation.
+                                         Hidden otherwise, and on a closed session. -->
+                                    <TextBlock Text="{Binding LiveElsewhereText}" ToolTip="{Binding LiveElsewhereTip}"
+                                               Foreground="#FFE06C6C" FontWeight="SemiBold" FontSize="{Binding DataContext.TasksPanel.FontScale, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource FontScale}, ConverterParameter=11}"
+                                               TextWrapping="Wrap" FlowDirection="LeftToRight" Margin="0,1,0,0">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasLiveElsewhere}" Value="False">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Closed}" Value="True">
                                                         <Setter Property="Visibility" Value="Collapsed"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>

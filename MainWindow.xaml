@@ -335,6 +335,10 @@
                         </Style.Triggers>
                     </Style>
                 </DockPanel.Style>
+                <!-- Why the last run was refused. Stays until the number is edited: the status bar
+                     is overwritten within seconds, which made a refusal look like a dead press. -->
+                <TextBlock x:Name="RunTaskRefusal" DockPanel.Dock="Bottom" Visibility="Collapsed"
+                           Foreground="#FFE08A7D" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0"/>
                 <TextBlock DockPanel.Dock="Left" Text="▶ Run task" Foreground="#FF9A9A9A"
                            FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <Button DockPanel.Dock="Right" Content="Run" Click="RunTask_Click"
@@ -348,8 +352,10 @@
                          KeyDown="RunTaskBox_KeyDown" TextChanged="RunTaskBox_TextChanged"
                          ToolTip="A task number, e.g. 4.13 or 4.13.19. Enter runs it. Add “fast” for the task's fast variant, and a group's id or alias (or hold its modifier) to pick which VS Code instance it opens in. With TasksFollowGroups on, Shift+Enter opens the task in its own folder."/>
             </DockPanel>
-            <!-- left half: the whole row unless the Run half stands beside it -->
-            <DockPanel LastChildFill="True">
+            <!-- left half: the whole row unless the Run half stands beside it. Top, not the default
+                 Stretch: the Run half grows by the refusal line under its box, and a stretched
+                 search half grew with it (the box went from 38 to 90 high while a refusal showed). -->
+            <DockPanel LastChildFill="True" VerticalAlignment="Top">
                 <DockPanel.Style>
                     <Style TargetType="DockPanel">
                         <Setter Property="Grid.ColumnSpan" Value="3"/>

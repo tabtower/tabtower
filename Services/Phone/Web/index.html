@@ -133,7 +133,26 @@
   .phrase { margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: var(--bg); color: var(--text);
             font-weight: 600; overflow-wrap: anywhere; }
   .toast .t-more { color: inherit; font-weight: 700; text-decoration: underline; }
+  /* A card's chips, and the detail a tap on one (or on the card) opens: what the PC shows on hover. */
+  .t-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .t-chip { appearance: none; border: 0; border-radius: 999px; padding: 2px 10px; font: inherit; font-size: 12px;
+            background: #3a3a3a; color: #d0d0d0; }
+  button.t-chip { cursor: pointer; }
+  .task[data-detail] { cursor: pointer; }
+  .detail-box { max-height: 80vh; overflow-y: auto; }
+  .detail-head { display: flex; align-items: flex-start; gap: 10px; }
+  .detail-head .sheet-title { flex: 1; min-width: 0; overflow-wrap: anywhere; text-align: start; }
+  .detail-close { appearance: none; flex: none; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 10px;
+                  background: transparent; color: var(--text); font-size: 18px; cursor: pointer; }
+  .d-sec { margin-top: 12px; }
+  .d-heading { font-weight: 700; font-size: 14px; margin-bottom: 4px; text-align: start; }
+  .d-row { padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; overflow-wrap: anywhere; text-align: start; }
+  .d-row.rich .d-text { font-weight: 600; }
+  .d-num { color: var(--muted); font-size: 12px; margin: 0 6px; }  /* both sides: its own direction is LTR inside an RTL row */
+  .d-detail { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .d-more, .d-footer { color: var(--muted); font-size: 13px; margin-top: 6px; text-align: start; }
   .opt-state { color: var(--muted); font-weight: 400; font-size: 14px; }
+  .options .btn { white-space: normal; }
   .fast { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 15px; }
   .fast input { width: 20px; height: 20px; }
 </style>
@@ -186,6 +205,15 @@
       <button class="btn ghost" id="sheet-cancel" data-i18n="cancel" data-i18n-title="cancel_title">Cancel</button>
       <button class="btn" id="sheet-ok"></button>
     </div>
+  </div>
+</div>
+<div class="sheet" id="detail" hidden role="dialog" aria-modal="true" aria-labelledby="detail-title">
+  <div class="sheet-box detail-box" id="detail-box">
+    <div class="detail-head">
+      <div class="sheet-title" id="detail-title" dir="auto"></div>
+      <button class="detail-close" id="detail-close" data-i18n-title="detail_close_title">✕</button>
+    </div>
+    <div id="detail-body"></div>
   </div>
 </div>
 <div class="sheet" id="launch" hidden role="dialog" aria-modal="true" aria-labelledby="launch-title">
@@ -346,7 +374,11 @@
       const ss = [...c.sessions].sort((a, b) => ((b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
         || (a.pinned ? 0 : (b.at || 0) - (a.at || 0)));
       const many = c.targets.length > 1;
-      const buttons = c.targets.length
+      // 0.11.66: a card with more than one window gets ONE button that opens the window sheet.
+      let sheet = many;
+      const buttons = sheet
+        ? `<div class="groups"><button class="btn" data-pick="${i}" title="${esc(t('new_session_title'))}">${esc(t('new_session'))}</button></div>`
+        : c.targets.length
         ? `<div class="groups">${c.targets.map((g) => g.state === 'ready'
             ? `<button class="btn" data-card="${i}" data-group="${esc(g.group)}" title="${esc(t('new_session_title'))}">${esc(many ? t('new_session_group', { group: g.label }) : t('new_session'))}</button>`
             : `<button class="btn ghost" data-card="${i}" data-group="${esc(g.group)}" title="${esc(t('launch_title'))}">${esc(t('launch_group', { group: g.label }))}</button>`).join('')}</div>`
@@ -461,21 +493,38 @@
     const groupText = target.label && c.targets.length > 1 ? t('new_confirm_group', { group: target.label }) : '';
     if (!await confirmSheet(t('new_confirm_title'), t('new_confirm_text', { card: c.title, group: groupText }),
                             t('new_confirm_ok'), t('new_session_title'), false)) return;
+    await openNew(c, target.group, b);
+  });
+
+  // 0.11.66: the window sheet. Picking a window in it is the confirmation, as on the tasks page.
+  $('list').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('button[data-pick]');
+    if (!b || busy) return;
+    const c = lastCards[Number(b.dataset.pick)];
+    if (!c) return;
+    const options = c.targets.map((g, n) => ({ key: g.group, label: g.label, color: g.color, state: g.state, own: n === 0 && c.key.split(':').length > 2 }));
+    const group = await pickWindow(t('win_pick_title'), t('win_pick_text', { card: c.title }), options, false);
+    if (group == null) return;
+    await openNew(c, group.option, b);
+  });
+
+  async function openNew(c, group, b) {
     busy = true;
-    document.querySelectorAll('button[data-card]').forEach((x) => (x.disabled = true));
+    document.querySelectorAll('button[data-card], button[data-pick]').forEach((x) => (x.disabled = true));
     b.textContent = t('opening');
     toast(esc(t('toast_opening')), 40000);
     try {
-      const { r, d } = await post('/api/new', { card: c.key, group: target.group });
+      const { r, d } = await post('/api/new', { card: c.key, group });
+      const picked = d.picked ? esc(t('toast_picked', { group: d.picked })) + ' ' : '';
       if (!d.ok) toast(esc(t('failed', { reason: reason(d, r.status) })), 9000);
-      else if (d.launching) toast(esc(t('toast_launching')), 15000);
-      else if (d.link) toast(`${esc(t('toast_new_link'))} <a href="${esc(d.link)}">${esc(t('toast_open_in_app'))}</a>`, 20000);
-      else toast(esc(t('toast_new_nolink')), 9000);
+      else if (d.launching) toast(picked + esc(t('toast_launching')), 15000);
+      else if (d.link) toast(`${picked}${esc(t('toast_new_link'))} <a href="${esc(d.link)}">${esc(t('toast_open_in_app'))}</a>`, 20000);
+      else toast(picked + esc(t('toast_new_nolink')), 9000);
       if (d.ok && d.sessionId && !d.link) watchForLink(d.sessionId);
     } catch (e) {
       toast(esc(t('failed', { reason: e.message })), 9000);
     } finally { busy = false; load(); }
-  });
+  }
 
   // ---- recently closed: loaded only when opened ----
   async function loadClosed() {
@@ -542,16 +591,24 @@
   }
   document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
+  // A colour from the tasks file is applied only in this shape.
+  const HEX = /^#[0-9a-fA-F]{6}$/;
   function taskCard(task) {
     const status = task.status ? `<span class="t-status" dir="auto" style="border-color:${esc(task.color)}">${esc(task.status)}</span>` : '';
     const actions = [];
     if (task.canStart) actions.push(`<button class="btn" data-start="${esc(task.id)}" title="${esc(t('task_start_title'))}">${esc(t('task_start'))}</button>`);
     if (task.nav) actions.push(`<button class="btn ghost" data-nav="${esc(task.id)}" title="${esc(t('task_open_title'))}" dir="auto">${esc(task.navLabel || t('task_open'))}</button>`);
     if (task.link) actions.push(`<a class="btn ghost" href="${esc(task.link)}" target="_blank" rel="noopener">${esc(t('task_link'))}</a>`);
-    return `<section class="card task" data-color="${esc(task.color)}">
+    // Chips: a chip with a detail behind it is a button, one without is a plain label.
+    const chips = (task.chips || []).map((c, i) => c.hover
+      ? `<button class="t-chip" data-chip="${i}" data-bg="${esc(c.background)}" data-fg="${esc(c.foreground)}" title="${esc(t('chip_detail_title'))}" dir="auto">${esc(c.label)}</button>`
+      : `<span class="t-chip" data-bg="${esc(c.background)}" data-fg="${esc(c.foreground)}" dir="auto">${esc(c.label)}</span>`).join('');
+    const detail = task.hover ? ` data-detail="1" title="${esc(t('task_detail_title'))}"` : '';
+    return `<section class="card task" data-color="${esc(task.color)}" data-task="${esc(task.id)}"${detail}>
       <div class="t-head"><bdi class="t-id" dir="ltr">${esc(task.id)}</bdi>${status}</div>
       <div class="t-name" dir="auto">${esc(task.name)}</div>
       ${task.lead ? `<div class="t-lead" dir="auto">${esc(task.lead)}</div>` : ''}
+      ${chips ? `<div class="t-chips">${chips}</div>` : ''}
       ${task.description ? `<div class="t-desc" dir="auto">${esc(task.description)}</div><button class="t-more" data-more>${esc(t('task_more'))}</button>` : ''}
       ${actions.length ? `<div class="t-actions">${actions.join('')}</div>` : ''}
     </section>`;
@@ -580,6 +637,10 @@
       + rest.map(taskCard).join('')
       + (v.tasks.length ? '' : `<div class="banner">${esc(t('tasks_empty'))}</div>`);
     $('tasks').querySelectorAll('section.card').forEach((el) => { el.style.borderInlineStartColor = el.dataset.color || ''; });
+    $('tasks').querySelectorAll('.t-chip').forEach((el) => {
+      if (HEX.test(el.dataset.bg || '')) el.style.background = el.dataset.bg;
+      if (HEX.test(el.dataset.fg || '')) el.style.color = el.dataset.fg;
+    });
     // "More" only where the description is really cut.
     $('tasks').querySelectorAll('.t-desc').forEach((el) => {
       if (el.scrollHeight <= el.clientHeight + 2) el.nextElementSibling.hidden = true;
@@ -650,23 +711,80 @@
     if (start && lastTasks) {
       const task = lastTasks.tasks.find((x) => x.id === start.dataset.start);
       if (task) launchTask(task);
+      return;
     }
+    // A chip opens what it counts; a tap anywhere else on a card that has a detail opens the
+    // card's. Both are the panels the PC shows on hover.
+    const card = ev.target.closest('section.task');
+    const task = card && lastTasks ? lastTasks.tasks.find((x) => x.id === card.dataset.task) : null;
+    if (!task) return;
+    const chip = ev.target.closest('button[data-chip]');
+    if (chip) {
+      const c = (task.chips || [])[+chip.dataset.chip];
+      if (c && c.hover) openDetail(c.hover, c.label);
+      return;
+    }
+    if (task.hover && !ev.target.closest('button, a')) openDetail(task.hover, task.id + ' · ' + task.name);
   });
+
+  // The detail sheet: closed by its ✕, a tap outside the panel, Esc, or the phone's Back.
+  function hoverHtml(h) {
+    const sections = (h.sections || []).map((s) => {
+      const rows = (s.rows || []).map((r) => {
+        const details = (r.details || []).map((d) =>
+          `<div class="d-detail" dir="auto">${d.label ? `<bdi>${esc(d.label)}</bdi>: ` : ''}<bdi>${esc(d.value)}</bdi></div>`).join('');
+        return `<div class="d-row${details ? ' rich' : ''}"><span class="d-text" dir="auto">${esc(r.text)}</span>`
+          + (r.number ? `<bdi class="d-num" dir="ltr">${esc(r.number)}</bdi>` : '') + details + '</div>';
+      }).join('');
+      return `<div class="d-sec">${s.heading ? `<div class="d-heading" dir="auto" data-color="${esc(s.color)}">${esc(s.heading)}</div>` : ''}`
+        + rows + (s.more ? `<div class="d-more" dir="auto">${esc(s.more)}</div>` : '') + '</div>';
+    }).join('');
+    return sections + (h.footer ? `<div class="d-footer" dir="auto">${esc(h.footer)}</div>` : '');
+  }
+  function openDetail(h, fallbackTitle) {
+    $('detail-box').dir = h.rtl ? 'rtl' : 'ltr';
+    $('detail-title').textContent = h.title || fallbackTitle || '';
+    $('detail-body').innerHTML = hoverHtml(h);
+    $('detail-body').querySelectorAll('.d-heading').forEach((el) => { if (HEX.test(el.dataset.color || '')) el.style.color = el.dataset.color; });
+    $('detail-box').scrollTop = 0;
+    if ($('detail').hidden) {
+      $('detail').hidden = false;
+      try { history.pushState({ ttDetail: 1 }, ''); } catch { }
+    }
+    $('detail-close').focus();
+  }
+  function closeDetail(fromBack) {
+    if ($('detail').hidden) return;
+    $('detail').hidden = true;
+    if (!fromBack && history.state && history.state.ttDetail) { try { history.back(); } catch { } }
+  }
+  $('detail-close').addEventListener('click', () => closeDetail(false));
+  $('detail').addEventListener('click', (ev) => { if (ev.target === $('detail')) closeDetail(false); });
+  window.addEventListener('popstate', () => closeDetail(true));
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeDetail(false); });
 
   // The window picker: one button per VS Code instance, each the window the same click on the
   // PC with that key held opens in. Resolves to { option, fast } or null.
   let launchDone = null;
   function pickLaunch(task) {
-    const options = lastTasks && lastTasks.options.length ? lastTasks.options : [{ key: '', label: t('task_launch_default'), color: '' }];
-    $('launch-title').textContent = t('task_launch_title');
-    $('launch-text').textContent = t('task_launch_text', { task: task.id + ' · ' + task.name });
-    $('launch-fast-row').hidden = !task.hasFast;
+    const base = lastTasks && lastTasks.options.length ? lastTasks.options : [{ key: '', label: t('task_launch_default'), color: '' }];
+    const options = [...base];
+    return pickWindow(t('task_launch_title'), t('task_launch_text', { task: task.id + ' · ' + task.name }), options, task.hasFast);
+  }
+
+  // The window sheet, for a task and for a card's new session. Resolves to { option, fast } or null.
+  function pickWindow(title, text, options, fastVisible) {
+    $('launch-title').textContent = title;
+    $('launch-text').textContent = text;
+    $('launch-fast-row').hidden = !fastVisible;
     $('launch-fast').checked = false;
     $('launch-pick').textContent = options.length > 1 ? t('task_launch_pick') : '';
     // A window that is not up says so: picking it starts it first, which takes about a minute.
-    $('launch-options').innerHTML = options.map((o) => `<button class="btn ghost" data-option="${esc(o.key)}" data-color="${esc(o.color)}"
-        ${o.state === 'off' ? 'disabled' : ''} title="${esc(t('task_launch_state_' + (o.state || 'ready') + '_title'))}" dir="auto">${esc(o.label)}${o.state === 'ready' || !o.state ? '' : `<span class="opt-state"> · ${esc(t('task_launch_state_' + o.state))}</span>`}</button>`).join('');
-    $('launch-options').querySelectorAll('button').forEach((el) => { el.style.borderInlineStartColor = el.dataset.color || 'var(--accent)'; });
+    $('launch-options').innerHTML = options.map((o) =>
+      `<button class="btn ghost" data-option="${esc(o.key)}" data-color="${esc(o.color)}"
+        ${o.state === 'off' ? 'disabled' : ''} title="${esc(t('task_launch_state_' + (o.state || 'ready') + '_title'))}" dir="auto">${esc(o.label)}${o.state === 'ready' || !o.state ? '' : `<span class="opt-state"> · ${esc(t('task_launch_state_' + o.state))}</span>`}${o.own ? `<span class="opt-state"> · ${esc(t('win_this'))}</span>` : ''}`
+      + '</button>').join('');
+    $('launch-options').querySelectorAll('button[data-color]').forEach((el) => { el.style.borderInlineStartColor = HEX.test(el.dataset.color || '') ? el.dataset.color : 'var(--accent)'; });
     hideToast();
     $('launch').hidden = false;
     return new Promise((resolve) => { launchDone = resolve; });
@@ -698,12 +816,13 @@
       // VS Code types the phrase into the new tab without sending it, so from here the user sends
       // it from the app: the toast shows it, and its link copies it on the way to the app.
       const phrase = d.prompt ? `<div class="phrase" dir="auto">${esc(d.prompt)}</div>` : '';
+      const picked = d.picked ? esc(t('toast_picked', { group: d.picked })) + ' ' : '';
       if (!d.ok) toast(esc(t('failed', { reason: reason(d, r.status) })), 9000);
-      else if (d.launching) toast(esc(t('toast_launching')), 15000);
-      else if (d.link) toast(`${esc(t(d.prompt ? 'toast_task_new' : 'toast_new_link'))}${phrase}
+      else if (d.launching) toast(picked + esc(t('toast_launching')), 15000);
+      else if (d.link) toast(`${picked}${esc(t(d.prompt ? 'toast_task_new' : 'toast_new_link'))}${phrase}
           <a href="${esc(d.link)}" data-copy="${esc(d.prompt || '')}">${esc(t(d.prompt ? 'task_copy_open' : 'toast_open_in_app'))}</a>`, 60000);
-      else if (d.prompt) toast(`${esc(t('toast_task_new'))}${phrase}<button class="t-more" data-copy="${esc(d.prompt)}">${esc(t('task_copy'))}</button>`, 60000);
-      else toast(esc(t('toast_new_nolink')), 9000);
+      else if (d.prompt) toast(`${picked}${esc(t('toast_task_new'))}${phrase}<button class="t-more" data-copy="${esc(d.prompt)}">${esc(t('task_copy'))}</button>`, 60000);
+      else toast(picked + esc(t('toast_new_nolink')), 9000);
       if (d.ok && d.sessionId && !d.link) watchForLink(d.sessionId);
     } catch (e) {
       toast(esc(t('failed', { reason: e.message })), 9000);

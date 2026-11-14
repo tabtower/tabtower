@@ -49,7 +49,8 @@ public sealed class TaskItemViewModel
            || Name.Contains(query, StringComparison.OrdinalIgnoreCase)
            || Status.Contains(query, StringComparison.OrdinalIgnoreCase)
            || Description.Contains(query, StringComparison.OrdinalIgnoreCase)
-           || Lead.Contains(query, StringComparison.OrdinalIgnoreCase);
+           || Lead.Contains(query, StringComparison.OrdinalIgnoreCase)
+           || Chips.Any(c => c.Label.Contains(query, StringComparison.OrdinalIgnoreCase));
     /// <summary>The workspace/sessions button exists when there is anywhere to go.</summary>
     public bool HasTarget => HasWorkspace || Sessions.Count > 0;
 
@@ -65,6 +66,29 @@ public sealed class TaskItemViewModel
 
     public static readonly Brush NeutralBrush = SessionViewModel.MakeBrush("#6E6E6E");
 
+    /// <summary>The producer asked for the status as a filled badge (statusStyle "pill").</summary>
+    public bool StatusPill { get; init; }
+    /// <summary>Text colour on the badge: dark on a light status colour, white on a dark one.</summary>
+    public Brush StatusPillForeground { get; init; } = Brushes.White;
+    public IReadOnlyList<TaskChipViewModel> Chips { get; init; } = Array.Empty<TaskChipViewModel>();
+    public bool HasChips => Chips.Count > 0;
+    /// <summary>The chip row wraps from the side its labels are read from: one Hebrew label
+    /// puts the whole row right-to-left, so the first chip is the one the eye meets first.</summary>
+    public FlowDirection ChipsFlow => Chips.Any(c => c.Flow == FlowDirection.RightToLeft)
+        ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
+    /// <summary>The card's own hover panel, or null for no tooltip (the default).</summary>
+    public TaskHoverViewModel? Hover { get; init; }
+    public bool HasHover => Hover != null;
+
+    static Brush PillForeground(Brush status)
+    {
+        if (status is not SolidColorBrush s) return Brushes.White;
+        var c = s.Color;
+        // Relative luminance, rounded: above ~0.5 is a light badge that needs dark text.
+        double lum = (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) / 255.0;
+        return lum > 0.5 ? SessionViewModel.MakeBrush("#0D1117") : Brushes.White;
+    }
+
     public string TooltipText
     {
         get
@@ -72,6 +96,7 @@ public sealed class TaskItemViewModel
             var lines = new List<string> { $"‏{Id}: {Name}" };
             if (HasStatus) lines.Add($"Status: {Status}");
             if (HasLead) lines.Add(Lead);
+            if (HasChips) lines.Add(string.Join(" · ", Chips.Select(c => c.Label)));
             if (HasDescription) lines.Add(Description);
             if (Pinned) lines.Add("📌 Pinned");
             return string.Join(Environment.NewLine, lines);
@@ -100,6 +125,10 @@ public sealed class TaskItemViewModel
             SessionPrompt = entry.SessionPrompt?.Trim() ?? "",
             SessionPromptFast = entry.SessionPromptFast?.Trim() ?? "",
             StatusBrush = brush,
+            StatusPill = status.Length > 0 && string.Equals(entry.StatusStyle?.Trim(), "pill", StringComparison.OrdinalIgnoreCase),
+            StatusPillForeground = PillForeground(brush),
+            Chips = (entry.Chips ?? new()).Select(TaskChipViewModel.From).OfType<TaskChipViewModel>().ToList(),
+            Hover = TaskHoverViewModel.From(entry.Hover),
         };
     }
 }

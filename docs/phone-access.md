@@ -88,6 +88,14 @@ last used. **Revoke** removes it at once; its next visit starts a new pairing.
 If a phone is lost, revoke it here, and also remove it from your tailnet in the Tailscale
 admin console.
 
+## Choosing the window
+
+When a card can open a session in more than one VS Code window (a folder with several session
+groups), its **+ Session** button opens a sheet with one button per window: the card's own
+window first, then the others. A window that is not running says so; picking it starts it, and
+the session opens there once it connects (about a minute). The same sheet is used by a task's
+**▶ Session**.
+
 ## The Tasks tab
 
 When TabTower has a tasks file (⚙ → Tasks file), the page gets a second tab, **Tasks**, that

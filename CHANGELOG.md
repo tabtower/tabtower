@@ -12,6 +12,230 @@ to it automatically.
 
 <!-- new releases are inserted directly below this line -->
 
+## v0.11.72 - unreleased
+
+- feat(cards): a click on a Claude Desktop session's card brings the Claude app's window to the front,
+  and the status bar says to pick the session in the app's sidebar, or that the app has no open window.
+  The click used to take the VS Code route, which for a live Desktop session ended at the refusal to
+  resume it beside its running process (0.11.62) and never showed where the session was. The app's
+  window is the visible, titled top-level window of `claude.exe`, the one titled exactly "Claude" first
+  (the Claude Code CLI has the same process name but owns no window). It stops at the window because
+  no `claude://` link was found that opens one given session. A terminal session's click is unchanged.
+  Contributed by @odedn72 in #2.
+- docs: the README says what a click on a Claude Desktop card does.
+
+## v0.11.71 - unreleased
+
+- docs: the README's environments table lists "Live window previews and session groups". No
+  behaviour change.
+
+## v0.11.70 - unreleased
+
+- chore: code comments, test fixtures and this changelog no longer carry work-item numbers, real
+  session ids or the release logs of builds that were never published. No behaviour change.
+
+## v0.11.69 - unreleased
+
+- docs: the README says per environment what works for a session in VS Code, in a terminal (`claude`) and in
+  Claude Desktop's Code tab. The card, its status, title, tokens, context use, cache countdown, notifications
+  and the phone page work in all three; opening the exact session on a click, closing or starting a session,
+  `--no-focus`, live previews, session groups and the phone's actions need VS Code. It
+  replaces the sentence that a terminal session appears "with a live status like any other". The landing
+  page adds "Claude Desktop: status only" under Install. No code change.
+
+## v0.11.68 - unreleased
+
+- fix(cards): a session a person runs outside VS Code, in a terminal (`claude`) or in Claude Desktop's Code
+  tab, keeps its card while it waits. The orphan sweep closed such a card after 15 minutes of silence because
+  no VS Code tab answered for it (measured 12-11-2026: a Desktop card closed 15 min after its turn while the
+  session lived four more hours). Its card now stays while Claude Code's live-session registry shows the
+  process running, and closes as before once the process is gone or SessionEnd arrives. VS Code sessions and
+  headless runs are unchanged.
+- fix(recovery): after TabTower restarts, a live terminal or Claude Desktop session gets its card back from the
+  registry, on the same identity proof as a VS Code session (running pid with its recorded start time, kind
+  interactive, a transcript on disk); a `--bg` run is still skipped.
+- fix(tabs): a terminal or Claude Desktop session never takes a VS Code tab's label, neither by a matching
+  title nor by elimination (0.11.64 did this for `--bg` runs only).
+
+## v0.11.67 - unreleased
+
+- fix(phone): an empty group card is listed only when its own window is up, as before 0.11.66. Since 0.11.66
+  every group card reaches every window of its folder, so an empty group card counted another group's
+  window as "ready" and came back on the page.
+
+## v0.11.66 - unreleased (installed locally only)
+
+- feat(phone): open a new session in any window. A card whose folder has several session groups now
+  offers all of them, its own
+  first (a group card used to offer only its own window, so from it a session could not be opened in
+  another group's window). Its **+ Session** button opens the window sheet the tasks page already used, and a
+  window that is not running can be picked (the deck starts it).
+
+## v0.11.65 - unreleased
+
+- fix(status): a background subagent's permission request no longer paints its session "waiting for you".
+  Measured twice on 10-11-2026 (21:19 and 23:30): a background agent's Bash was stopped by
+  Claude Code's removal safety check, PermissionRequest fired with the PARENT's session id, and the card
+  went orange "Waiting for permission: Bash" while the session's chat had nothing to answer. It stayed
+  orange for minutes, because the clearing waits for a scan of the main transcript and a session whose
+  turn ended with only a background agent working writes nothing there. The hook now adds `--subagent`
+  when the payload carries `agent_id` (PermissionRequest and Notification), and `SetSessionStatus` drops
+  such a wait unless the session has a live foreground agent, whose dialog does show in the session's
+  own chat. A payload without `agent_id` behaves exactly as before.
+
+## v0.11.64 - unreleased
+
+- fix(correlate): a `claude --bg` run never takes an IDE tab's label. On 03-11-2026 16:24:54
+  a background run (entrypoint `cli`, so neither print mode nor an `sdk-*` entrypoint marked it) was the
+  only titled tabless session when the elimination claim ran, took the label "Claude Code" of a tab that
+  was not its own, and its card then counted as a session of a window. What tells such a run apart is the
+  `sessionKind` ("bg") its transcript lines carry; an IDE session's lines carry none (74 of the 9,463
+  transcripts on this machine have it, all `bg`, all entrypoint `cli`). `TranscriptReader` reads it from
+  the same newest line that names the host, so a background conversation reopened in the IDE stops being
+  one with its first new line, `SessionViewModel.SessionKind` holds it (persisted), and `HeadlessRun.Is`
+  and `EliminationScope.MayHoldTab` take it as a third signal. Side effect, intended: a bg run now counts
+  as headless everywhere `IsHeadless` is read, so its card leaves the window's count and the lists unless
+  the headless cards are shown. `tests/elimination-scope.tests.ps1` gains 13 cases (41 in all, the 03-11
+  incident and its control among them).
+- fix(ui): the search box keeps its height while the Run box shows a refusal. The search
+  half of the row stretched to the height of the Run half, which grows by the refusal line, so the box
+  went from 38 to 90 px high; the search half is now top-aligned (`VerticalAlignment="Top"` in
+  `MainWindow.xaml`).
+
+## v0.11.63 - unreleased
+
+- fix(route): the refused open now shows on the session's card, not only in the status line
+  (review of 0.11.62). A red line "Still running in another process <time>: not resumed",
+  with the reason in its tooltip, stays until the next request to open the session; a closed
+  session shows none. New `tests/live-resume.tests.ps1` renders a real card offscreen (7 checks).
+  Still open: the panel routes (the phone's Reopen, a pre-0.6.12 extension) are not
+  checked against the session registry.
+
+## v0.11.62 - unreleased
+
+- fix(route): a card click never starts a second `claude --resume` beside a running process.
+  The terminal route ("no tab in its window") asked no one whether the session was
+  still alive; on 03-11-2026 it opened `claude --resume` beside the session's running process and
+  two processes wrote one conversation. When Claude Code's session registry shows the process
+  running, the click now resumes nothing and says why in the status bar. `tests/session-recovery.tests.ps1`
+  gains a `probe` stage over its real-process fixture registry.
+
+## v0.11.61 - unreleased
+
+- **The Run box says why it refused, and the reason stays on screen.** A refusal used to be
+  a red border plus a status-bar line the deck overwrites within seconds, so it read as a
+  press that did nothing. The reason now sits under the box until the number is edited, and
+  it names the time of the tasks file, because a task newer than the file is refused exactly
+  like a closed one.
+
+## v0.11.60 - unreleased
+
+- fix(correlate): a headless run never takes an IDE tab's label. The elimination claim, and the
+  sleeping-session list, excluded only runs the hook had proven print-mode, and the hook never sends
+  print mode for an `sdk-*` entrypoint, so an SDK run (a background batch run) counted as a tabless IDE
+  session. On 02-11-2026 one took, as "the single pair", the label of a tab just opened in its
+  launcher's window, while the session inside that tab had no title yet, and kept it as its card
+  title. Both checks now go through `EliminationScope.MayHoldTab`, over the one headless rule
+  (`Services/HeadlessRun.cs`) that `SessionViewModel.IsHeadless` also reads.
+  `tests/elimination-scope.tests.ps1` gains 8 cases, including the 02-11 incident (28 in all).
+
+## v0.11.59 - unreleased
+
+- fix(correlate): the elimination claim no longer hands a session a tab from another window, and
+  never hands one to a wrapped session. A session stamped in one window could take, as "the single
+  pair", a dormant tab only another window showed, and its card then carried that tab's name. The
+  headcount is now scoped to the window (`Services/EliminationScope.cs`); anything the deck does not
+  know (no stamp, an unidentified window) keeps the old rule, and the partial-claim refusal still
+  reads every unowned tab on the card. New suite: `tests/elimination-scope.tests.ps1` (20 cases).
+
+- feat(cli): `tabtower tabs [--group <id>]` lists the Claude tabs of each group's window, each with the
+  session that answers to it or `unassociated`, and `tabtower tabs close --group <id> --label "..."` closes
+  ONE unassociated tab by its label, through the connector's by-label path, which never reveals. For the
+  tab VS Code restores after an extension or VS Code update ended its session: the card was closed 60 s
+  after the tab left, so nothing reached by session id could close it (measured 30-10-2026). Refused unless exactly one Claude tab of the window carries the
+  label, no card (open, replaced, or closed with its process still running) answers to it and no live
+  session of the window holds a tab by elimination (`Services/TabLabelClose.cs`). New suite:
+  `tests/tab-label-close.tests.ps1` (21 cases).
+
+## v0.11.58 - unreleased
+
+- feat(cards): a message the headless sender could not deliver (a task's opening phrase, a
+  keep-alive or the park message) now stays on the session's card as a red line, for example
+  "Keep-alive failed 14:02 31/10: Failed to authenticate", with the sender's whole output in its
+  tooltip. A failed task phrase also says it is on the clipboard. The line clears on the next send
+  that gets through or when you type in the session. Until now the failure reached only the status
+  line, which the next status overwrites within seconds.
+
+## v0.11.57 - unreleased
+
+- fix(install): the copy step now retries a locked file for 30 s instead of about 3. On
+  26-10-2026 short-lived hook clients held TabTower.dll past the old eight retries, the copy
+  failed and the deck stayed down about a minute until the install was run again.
+
+## v0.11.52 - unreleased
+
+- feat(phone): a task card on the phone page shows its chips, and a tap opens the detail the PC
+  shows on hover: a chip opens what it counts, a tap anywhere else on the card opens the card's
+  own detail. The detail is a sheet with the panel's title, sections (heading in its colour), rows
+  with their numbers and label/value lines, the "and N more" line and the footer, laid out right to
+  left when the panel is. It closes with its close button, a tap outside it, Esc or the phone's
+  Back. A chip with nothing behind it is a plain label, and a card with no detail does nothing on
+  a tap. `/api/tasks` carries each task's `chips` and `hover` for it.
+
+## v0.11.51 - unreleased
+
+- fix(close): closing a live session's tab by id no longer brings that tab to the front first when
+  its label names it. With connector 0.7.3 the deck marks the request `Unique` when exactly one of
+  the window's tabs answers to the session and no other live session answers to that label; the
+  connector then closes the one Claude tab carrying the label where it is (`preserveFocus`), and
+  nothing is revealed or handed back. A shared label (a leftover, a fork, several "Claude Code"
+  tabs), or a connector older than 0.7.3, keeps the reveal, which finds the tab through Claude
+  Code's own id-to-panel registry. In all 64 logged by-id closes the reveal had brought the tab to
+  the front, and three left the user on a different tab.
+
+## v0.11.50 - unreleased
+
+- docs(launch): the round-8 hero recording on the landing page and in the README, as published
+  with v0.11.44 (public main 062b97b). The public build pins the published 0.11.44 step and that
+  docs step, so the next cut rebuilds both unchanged.
+
+## v0.11.49 - unreleased
+
+- feat(cli): `tabtower session open --id <sid> --no-focus` wakes a sleeping tab where it is. A tab
+  VS Code restored after a reboot has no `claude` process until it is clicked, and a plain
+  `session open` both raised the window (SetForegroundWindow) and could launch VS Code. With
+  `--no-focus` the deck raises nothing and launches nothing: it refuses, with a non-zero exit and
+  nothing sent, when the session's window is not connected or its tab is not in that window, and
+  it answers "already running" without touching the window when the session's process is alive.
+  Otherwise it asks the window's connector to wake the tab, with no side-bar collapse.
+- feat(connector 0.7.2): `openSession` with `NoFocus` makes the sleeping tab active, which is what
+  starts its process, then hands the window's previously active editor group and tab back after
+  half a second. A window still on connector 0.7.1 wakes the tab and leaves it active inside that
+  window (the OS window is not raised there either); the deck's answer says so.
+- feat(cli): `tabtower session list --sleeping` lists those tabs: closed sessions of a connected
+  window whose tab label is still reported and left over once the live sessions have claimed
+  theirs, with no running process in Claude Code's live-session registry. When more sessions
+  answer to a label than there are spare tabs carrying it, or while live sessions on the card hold
+  tabs only by headcount, each is flagged `[ambiguous: <reason>]` instead of the deck guessing.
+
+## v0.11.46 - unreleased
+
+- test(cards): the rule that retires a folderless duplicate card (0.11.44) now has a test suite,
+  `tests/pathless-duplicates.tests.ps1`. The rule deletes a card from the deck, so the suite
+  checks that the one card meant to go goes, and that each condition on its own keeps a card:
+  a folder, a name, a session, hidden, ever used, a custom title, colour or description, a
+  window no card with a folder owns, no connector, and a title the name was not cut from. The
+  rule moved unchanged into `Services/PathlessDuplicate.cs` so the test compiles the shipped
+  code without starting the app; the deck behaves exactly as before.
+
+## v0.11.45 - unreleased
+
+- fix(tasks): on a task card narrower than 400 px the name moves to a line of its own under the
+  id and status, at the card's full width. Beside them it was left a column a few letters wide,
+  so a name like `claude-training` wrapped inside its words, one or two letters to a line. Every
+  card of a list has the same width, so the whole list changes shape at once. A wider card keeps
+  the name beside the id and status as before.
+
 ## v0.11.44 - unreleased
 
 - fix(cards): a VS Code window that its extension already reports is no longer turned into a

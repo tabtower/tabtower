@@ -184,6 +184,27 @@ public static class NativeMethods
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LASTINPUTINFO
+    {
+        public uint cbSize;
+        public uint dwTime;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+
+    /// <summary>How long since the user last touched the keyboard or mouse in this session
+    /// (GetLastInputInfo). Zero when the call fails, which reads as "busy": the callers only ever
+    /// wait longer on it, never act sooner.</summary>
+    public static TimeSpan UserIdleFor()
+    {
+        var info = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+        if (!GetLastInputInfo(ref info)) return TimeSpan.Zero;
+        // Both are milliseconds since boot on the same 32-bit clock; unsigned subtraction survives the wrap.
+        return TimeSpan.FromMilliseconds(unchecked((uint)Environment.TickCount - info.dwTime));
+    }
+
     // ---- process parentage (which VSCode window an extension host belongs to) ----
 
     [StructLayout(LayoutKind.Sequential)]
